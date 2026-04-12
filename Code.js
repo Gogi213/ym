@@ -411,13 +411,15 @@ function getBackfillSettings_(propertiesService) {
     functionUrl.replace(/\/functions\/v1\/[^/]+$/, '/rest/v1'),
     CONFIG_.supabaseRestUrlProperty
   );
-  const serviceRoleKey = resolveSettingValue_(
-    scriptProperties.getProperty(CONFIG_.supabaseServiceRoleKeyProperty),
-    '',
-    CONFIG_.supabaseServiceRoleKeyProperty
-  );
+  const serviceRoleKey = String(
+    scriptProperties.getProperty(CONFIG_.supabaseServiceRoleKeyProperty) || ''
+  ).trim();
 
-  return { restUrl, serviceRoleKey };
+  return {
+    restUrl,
+    serviceRoleKey,
+    skipExistingEnabled: Boolean(serviceRoleKey)
+  };
 }
 
 function parseJsonResponse_(response) {
@@ -684,12 +686,23 @@ function runMonthBackfill() {
   logProgress_('month_backfill_started', {
     targetRunDate,
     runDates,
+    skipExistingEnabled: backfillSettings.skipExistingEnabled,
     elapsedMs: elapsedMs_(startedAtMs)
   });
 
+  if (!backfillSettings.skipExistingEnabled) {
+    logProgress_('month_backfill_skip_check_disabled', {
+      reason: 'SUPABASE_SERVICE_ROLE_KEY is not configured',
+      elapsedMs: elapsedMs_(startedAtMs)
+    });
+  }
+
   for (let i = 0; i < runDates.length; i++) {
     const runDate = runDates[i];
-    if (fetchRunDateExists_(runtime.UrlFetchApp, backfillSettings, runDate)) {
+    if (
+      backfillSettings.skipExistingEnabled &&
+      fetchRunDateExists_(runtime.UrlFetchApp, backfillSettings, runDate)
+    ) {
       summary.skippedExistingDates.push(runDate);
       logProgress_('month_backfill_skipped_existing', {
         runDate,

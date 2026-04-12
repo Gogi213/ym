@@ -436,6 +436,36 @@ test('buildRunContext_ loads timezone, topics, and ingest settings once', () => 
   });
 });
 
+test('getBackfillSettings_ degrades gracefully when service role key is absent', () => {
+  const scriptProperties = {
+    getProperty(name) {
+      if (name === 'SUPABASE_FUNCTION_URL') {
+        return 'https://example.supabase.co/functions/v1/mail-ingest';
+      }
+      if (name === 'SUPABASE_REST_URL') {
+        return '';
+      }
+      if (name === 'SUPABASE_SERVICE_ROLE_KEY') {
+        return '';
+      }
+      return '';
+    }
+  };
+
+  assert.deepEqual(
+    ingest.getBackfillSettings_({
+      getScriptProperties() {
+        return scriptProperties;
+      }
+    }),
+    {
+      restUrl: 'https://example.supabase.co/rest/v1',
+      serviceRoleKey: '',
+      skipExistingEnabled: false
+    }
+  );
+});
+
 test('chunkItems_ splits work into stable batches', () => {
   assert.deepEqual(
     ingest.chunkItems_([1, 2, 3, 4, 5], 2),
