@@ -1,7 +1,7 @@
 import unittest
 from datetime import date
 
-from scripts.run_pipeline import select_pending_run_dates
+from scripts.run_pipeline import select_pending_run_dates, should_sync_full_operator_views
 
 
 class RunPipelineTests(unittest.TestCase):
@@ -16,6 +16,16 @@ class RunPipelineTests(unittest.TestCase):
                 ]
             ),
             ["2026-04-10", "2026-04-08"],
+        )
+
+    def test_should_sync_full_operator_views_only_when_normalized_runs_exist(self):
+        self.assertFalse(should_sync_full_operator_views([]))
+        self.assertTrue(
+            should_sync_full_operator_views(
+                [
+                    {"run_date": "2026-04-10", "fact_rows": 100},
+                ]
+            )
         )
 
 

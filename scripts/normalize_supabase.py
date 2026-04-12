@@ -10,7 +10,8 @@ import io
 import json
 import os
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+import time
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import quote, urlsplit, urlunsplit
 import uuid
 import zipfile
@@ -32,6 +33,16 @@ HEADER_ALIASES: Dict[str, Tuple[str, str]] = {
 }
 
 MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+
+
+def emit_log(
+    logger: Optional[Callable[[str, Dict[str, Any]], None]],
+    phase: str,
+    payload: Dict[str, Any],
+) -> None:
+    if logger is None:
+        return
+    logger(phase, payload)
 
 
 def normalize_header(value: str) -> str:
@@ -558,86 +569,70 @@ def upsert_topic_goal_slots(conn, records: Sequence[Dict[str, Any]]) -> None:
         )
 
 
-def insert_fact_rows(conn, rows: Sequence[Dict[str, Any]]) -> None:
+def copy_records(
+    conn,
+    *,
+    table_name: str,
+    columns: Sequence[str],
+    rows: Sequence[Dict[str, Any]],
+) -> None:
     if not rows:
         return
 
+    column_list = ", ".join(columns)
+    copy_sql = f"copy {table_name} ({column_list}) from stdin"
+
     with conn.cursor() as cur:
-        cur.executemany(
-            """
-            insert into public.fact_rows (
-              fact_row_id,
-              topic,
-              source_file_id,
-              source_row_index,
-              report_date,
-              report_date_from,
-              report_date_to,
-              message_date,
-              layout_signature,
-              row_hash,
-              source_row_json
-            )
-            values (
-              %(fact_row_id)s,
-              %(topic)s,
-              %(source_file_id)s,
-              %(source_row_index)s,
-              %(report_date)s,
-              %(report_date_from)s,
-              %(report_date_to)s,
-              %(message_date)s,
-              %(layout_signature)s,
-              %(row_hash)s,
-              %(source_row_json)s::jsonb
-            )
-            """,
-            rows,
-        )
+        with cur.copy(copy_sql) as copy:
+            for row in rows:
+                copy.write_row(tuple(row.get(column) for column in columns))
+
+
+def insert_fact_rows(conn, rows: Sequence[Dict[str, Any]]) -> None:
+    copy_records(
+        conn,
+        table_name="public.fact_rows",
+        columns=[
+            "fact_row_id",
+            "topic",
+            "source_file_id",
+            "source_row_index",
+            "report_date",
+            "report_date_from",
+            "report_date_to",
+            "message_date",
+            "layout_signature",
+            "row_hash",
+            "source_row_json",
+        ],
+        rows=rows,
+    )
 
 
 def insert_fact_dimensions(conn, rows: Sequence[Dict[str, Any]]) -> None:
-    if not rows:
-        return
-
-    with conn.cursor() as cur:
-        cur.executemany(
-            """
-            insert into public.fact_dimensions (
-              fact_row_id,
-              dimension_key,
-              dimension_value
-            )
-            values (
-              %(fact_row_id)s,
-              %(dimension_key)s,
-              %(dimension_value)s
-            )
-            """,
-            rows,
-        )
+    copy_records(
+        conn,
+        table_name="public.fact_dimensions",
+        columns=[
+            "fact_row_id",
+            "dimension_key",
+            "dimension_value",
+        ],
+        rows=rows,
+    )
 
 
 def insert_fact_metrics(conn, rows: Sequence[Dict[str, Any]]) -> None:
-    if not rows:
-        return
-
-    with conn.cursor() as cur:
-        cur.executemany(
-            """
-            insert into public.fact_metrics (
-              fact_row_id,
-              metric_key,
-              metric_value
-            )
-            values (
-              %(fact_row_id)s,
-              %(metric_key)s,
-              %(metric_value)s::numeric
-            )
-            """,
-            rows,
-        )
+    copy_records(
+        conn,
+        table_name="public.fact_metrics",
+        columns=[
+            "fact_row_id",
+            "metric_key",
+            "metric_value",
+        ],
+        rows=rows,
+    )
 
 
 def refresh_current_flags(conn) -> None:
@@ -645,35 +640,95 @@ def refresh_current_flags(conn) -> None:
         cur.execute("select public.refresh_fact_rows_current_flags()")
 
 
-def normalize_run(run_date: str) -> Dict[str, int]:
+def normalize_run(
+    run_date: str,
+    logger: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+) -> Dict[str, int]:
+    started_at = time.perf_counter()
+
+    def phase(name: str, **payload: Any) -> None:
+        emit_log(
+            logger,
+            name,
+            {
+                "run_date": run_date,
+                "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                **payload,
+            },
+        )
+
+    phase("normalize_connecting")
     with connect_db() as conn:
+        phase("normalize_fetch_ingested_files_started")
         files = fetch_ingested_files(conn, run_date)
+        phase("normalize_fetch_ingested_files_finished", files=len(files))
         topics = sorted({file_row["matched_topic"] for file_row in files})
         file_ids = [str(file_row["id"]) for file_row in files]
+
+        phase("normalize_fetch_rows_started", file_ids=len(file_ids))
         rows_by_file_id = fetch_ingest_rows(conn, file_ids)
+        phase(
+            "normalize_fetch_rows_finished",
+            files_with_rows=len(rows_by_file_id),
+            raw_rows=sum(len(rows) for rows in rows_by_file_id.values()),
+        )
+        phase("normalize_fetch_payloads_started", file_ids=len(file_ids))
         payloads_by_file_id = fetch_ingest_payloads(conn, file_ids)
+        phase("normalize_fetch_payloads_finished", payloads=len(payloads_by_file_id))
+        phase("normalize_fetch_goal_slots_started", topics=len(topics))
         existing_goal_slots = fetch_existing_goal_slots(conn, topics)
+        phase("normalize_fetch_goal_slots_finished", topics_with_slots=len(existing_goal_slots))
+
+        phase("normalize_collect_goal_slots_started")
         goal_slots_by_topic, first_seen_file_ids = collect_goal_slots(files, existing_goal_slots)
+        phase(
+            "normalize_collect_goal_slots_finished",
+            topics=len(goal_slots_by_topic),
+            slots=sum(len(topic_slots) for topic_slots in goal_slots_by_topic.values()),
+        )
+        phase("normalize_build_goal_slot_records_started")
         topic_goal_slot_records = build_topic_goal_slot_records(
             goal_slots_by_topic=goal_slots_by_topic,
             first_seen_file_ids=first_seen_file_ids,
         )
+        phase("normalize_build_goal_slot_records_finished", goal_slot_records=len(topic_goal_slot_records))
+        phase("normalize_build_payloads_started")
         fact_rows, fact_dimensions, fact_metrics = build_normalized_payloads(
             files,
             rows_by_file_id,
             payloads_by_file_id,
             goal_slots_by_topic,
         )
+        phase(
+            "normalize_build_payloads_finished",
+            fact_rows=len(fact_rows),
+            fact_dimensions=len(fact_dimensions),
+            fact_metrics=len(fact_metrics),
+        )
 
+        phase("normalize_replace_rows_started")
         replace_normalized_rows_for_run(conn, run_date)
+        phase("normalize_replace_rows_finished")
+        phase("normalize_upsert_goal_slots_started", goal_slot_records=len(topic_goal_slot_records))
         upsert_topic_goal_slots(conn, topic_goal_slot_records)
+        phase("normalize_upsert_goal_slots_finished")
+        phase("normalize_insert_fact_rows_started", fact_rows=len(fact_rows))
         insert_fact_rows(conn, fact_rows)
+        phase("normalize_insert_fact_rows_finished")
+        phase("normalize_insert_fact_dimensions_started", fact_dimensions=len(fact_dimensions))
         insert_fact_dimensions(conn, fact_dimensions)
+        phase("normalize_insert_fact_dimensions_finished")
+        phase("normalize_insert_fact_metrics_started", fact_metrics=len(fact_metrics))
         insert_fact_metrics(conn, fact_metrics)
+        phase("normalize_insert_fact_metrics_finished")
+        phase("normalize_refresh_flags_started")
         refresh_current_flags(conn)
+        phase("normalize_refresh_flags_finished")
+        phase("normalize_commit_started")
         conn.commit()
+        phase("normalize_commit_finished")
 
-    return {
+    result = {
         "files": len(files),
         "topics": len(topics),
         "fact_rows": len(fact_rows),
@@ -681,6 +736,8 @@ def normalize_run(run_date: str) -> Dict[str, int]:
         "fact_metrics": len(fact_metrics),
         "goal_slots": len(topic_goal_slot_records),
     }
+    phase("normalize_finished", **result)
+    return result
 
 
 def parse_args() -> argparse.Namespace:
@@ -691,8 +748,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    result = normalize_run(args.run_date)
-    print(json.dumps({"ok": True, "run_date": args.run_date, **result}, ensure_ascii=False))
+    def cli_logger(phase: str, payload: Dict[str, Any]) -> None:
+        print(json.dumps({"phase": phase, **payload}, ensure_ascii=False), flush=True)
+
+    result = normalize_run(args.run_date, logger=cli_logger)
+    print(json.dumps({"ok": True, "run_date": args.run_date, **result}, ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":

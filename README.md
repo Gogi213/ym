@@ -62,6 +62,15 @@ One-command post-ingest pipeline:
 python scripts\run_pipeline.py --service-account-json key\service-account.json
 ```
 
+`run_pipeline.py` now prints phase logs and timings during execution:
+
+- `pipeline_started`
+- `normalize_*`
+- `sheet_sync_*`
+- `pipeline_finished`
+
+If there are no pending `run_date`, it only syncs `pipeline_status` and skips `отчеты` / `union`.
+
 ## Required Configuration
 
 Apps Script properties:

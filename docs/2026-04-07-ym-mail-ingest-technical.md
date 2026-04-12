@@ -290,6 +290,10 @@ Sparse-слой метрик:
    - `union`
    - `pipeline_status`
 
+`run_pipeline.py` и `normalize_supabase.py` теперь печатают фазовые JSON-логи с `elapsed_ms`.
+
+Если pending `run_date` нет, orchestrator не гоняет `отчеты` и `union`, а синкает только `pipeline_status`.
+
 ### Goal Mapping Spreadsheet Sync
 
 Goal mapping синхронизируется Python-скриптом, не Apps Script.

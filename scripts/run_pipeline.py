@@ -19,6 +19,10 @@ from scripts.sync_pipeline_status_sheet import fetch_pipeline_status_records, sy
 DEFAULT_SPREADSHEET_ID = "17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA"
 
 
+def log_progress(phase: str, payload: Dict[str, Any]) -> None:
+    print(json.dumps({"phase": phase, **payload}, ensure_ascii=False), flush=True)
+
+
 def select_pending_run_dates(records: List[Dict[str, Any]]) -> List[str]:
     pending: List[str] = []
     for record in records:
@@ -28,6 +32,10 @@ def select_pending_run_dates(records: List[Dict[str, Any]]) -> List[str]:
         if run_date:
             pending.append(run_date)
     return pending
+
+
+def should_sync_full_operator_views(normalized_results: List[Dict[str, Any]]) -> bool:
+    return bool(normalized_results)
 
 
 def sync_operator_views(*, spreadsheet_id: str, service_account_path: Path) -> Dict[str, Any]:
@@ -53,6 +61,17 @@ def sync_operator_views(*, spreadsheet_id: str, service_account_path: Path) -> D
     }
 
 
+def sync_status_only(*, spreadsheet_id: str, service_account_path: Path) -> Dict[str, Any]:
+    status_result = sync_pipeline_status_sheet(
+        spreadsheet_id=spreadsheet_id,
+        sheet_name="pipeline_status",
+        service_account_path=service_account_path,
+    )
+    return {
+        "pipeline_status": status_result,
+    }
+
+
 def run_pipeline(
     *,
     spreadsheet_id: str,
@@ -63,15 +82,43 @@ def run_pipeline(
     selected_run_dates = run_dates[:] if run_dates else select_pending_run_dates(status_before)
     normalized_results: List[Dict[str, Any]] = []
 
-    for run_date in selected_run_dates:
-        result = normalize_run(run_date)
-        normalized_results.append({"run_date": run_date, **result})
-
-    sync_results = sync_operator_views(
-        spreadsheet_id=spreadsheet_id,
-        service_account_path=service_account_path,
+    log_progress(
+        "pipeline_started",
+        {
+            "selected_run_dates": selected_run_dates,
+            "pending_count": len(selected_run_dates),
+        },
     )
+
+    for run_date in selected_run_dates:
+        log_progress("normalize_started", {"run_date": run_date})
+        result = normalize_run(run_date, logger=log_progress)
+        normalized_results.append({"run_date": run_date, **result})
+        log_progress("normalize_finished", {"run_date": run_date, **result})
+
+    full_sync = should_sync_full_operator_views(normalized_results)
+    sync_sheets = ["pipeline_status"] if not full_sync else ["отчеты", "union", "pipeline_status"]
+    log_progress("sheet_sync_started", {"sheets": sync_sheets})
+    sync_results = (
+        sync_operator_views(
+            spreadsheet_id=spreadsheet_id,
+            service_account_path=service_account_path,
+        )
+        if full_sync
+        else sync_status_only(
+            spreadsheet_id=spreadsheet_id,
+            service_account_path=service_account_path,
+        )
+    )
+    log_progress("sheet_sync_finished", sync_results)
     status_after = fetch_pipeline_status_records()
+    log_progress(
+        "pipeline_finished",
+        {
+            "selected_run_dates": selected_run_dates,
+            "normalized_count": len(normalized_results),
+        },
+    )
 
     return {
         "ok": True,
@@ -107,7 +154,8 @@ def main() -> None:
                 "sync": result["sync"],
             },
             ensure_ascii=False,
-        )
+        ),
+        flush=True,
     )
 
 
