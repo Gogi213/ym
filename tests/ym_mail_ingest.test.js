@@ -290,6 +290,17 @@ test('getMessageSearchQuery_ uses a wider recent window than the target export d
   );
 });
 
+test('getMonthBackfillSearchQuery_ covers the full month-to-date window', () => {
+  assert.equal(
+    ingest.getMonthBackfillSearchQuery_('2026-04-12'),
+    'after:2026/04/01 before:2026/04/13 has:attachment'
+  );
+  assert.equal(
+    ingest.getMonthBackfillSearchQuery_('2026-04-01'),
+    'after:2026/04/01 before:2026/04/02 has:attachment'
+  );
+});
+
 test('detectAttachmentType_ keeps only xlsx and csv candidates', () => {
   assert.equal(
     ingest.detectAttachmentType_({

@@ -149,6 +149,22 @@ function getMessageSearchQuery_(dayOffset) {
   return 'newer_than:' + lookbackDays + 'd has:attachment';
 }
 
+function getMonthBackfillSearchQuery_(targetRunDate) {
+  const raw = String(targetRunDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    throw new Error('Invalid targetRunDate: ' + raw);
+  }
+
+  const year = raw.slice(0, 4);
+  const month = raw.slice(5, 7);
+  const day = raw.slice(8, 10);
+  const nextDay = String(Number(day) + 1).padStart(2, '0');
+
+  return 'after:' + year + '/' + month + '/01' +
+    ' before:' + year + '/' + month + '/' + nextDay +
+    ' has:attachment';
+}
+
 function detectAttachmentType_(attachment) {
   const name = String(attachment && attachment.getName ? attachment.getName() : '').toLowerCase();
   const contentType = String(attachment && attachment.getContentType ? attachment.getContentType() : '').toLowerCase();
@@ -721,7 +737,7 @@ function runMonthBackfill() {
   const runDates = listMonthRunDates_(targetRunDate);
   const backfillSettings = getBackfillSettings_(runtime.PropertiesService);
   const startedAtMs = Date.now();
-  const query = getMessageSearchQuery_(CONFIG_.runDayOffset);
+  const query = getMonthBackfillSearchQuery_(targetRunDate);
   const threads = listThreadsForQuery_(runtime.GmailApp, query);
   const candidatesByRunDate = buildCandidatesByRunDate_(
     threads,

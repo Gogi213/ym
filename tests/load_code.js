@@ -16,6 +16,7 @@ const EXPORT_NAMES = [
   'extractSubjectReportDate_',
   'findMatchedTopic_',
   'formatRunDate_',
+  'getMonthBackfillSearchQuery_',
   'getMessageSearchQuery_',
   'getBackfillSettings_',
   'listMonthRunDates_',
