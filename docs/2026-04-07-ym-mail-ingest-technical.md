@@ -12,6 +12,7 @@
 - `Supabase raw tables`
 - `Python normalizer`
 - `Supabase export view`
+- `Python operator sheet sync`
 
 Что уже реализовано:
 
@@ -65,6 +66,19 @@
 - раскладывать строку на dimensions, metrics и `goal_N`;
 - стабильно назначать `goal_N` по теме;
 - строить normalized слой и wide export-view.
+
+### Python sheet sync
+
+Файлы:
+
+- [sync_goal_mapping_sheet.py](/C:/visual%20projects/ym/scripts/sync_goal_mapping_sheet.py)
+- [sync_export_rows_wide_sheet.py](/C:/visual%20projects/ym/scripts/sync_export_rows_wide_sheet.py)
+
+Ответственность:
+
+- писать goal mapping обратно в лист `отчеты`;
+- писать operator-facing `union` в отдельный лист;
+- не трогать raw или normalized данные в БД.
 
 ## Raw Layer
 
@@ -189,6 +203,27 @@ Sparse-слой метрик:
 - выводит `goal_1 ... goal_25`;
 - сохраняет `source_row_json` для кросс-проверки назад до исходной строки.
 
+Важно:
+
+- `public.export_rows_wide` остаётся полным wide-слоем из БД;
+- операторский лист `union` строится поверх него отдельным Python-экспортом;
+- `union` не является 1:1 копией `export_rows_wide`.
+
+## Operator Union Export
+
+Лист: `union`
+
+Экспорт строится Python-скриптом и отличается от DB-wide слоя:
+
+- `utm_term` всегда схлопывается в `aggregated`;
+- grouping идёт по всем остальным экспортируемым dimensions;
+- `bounce_rate` превращается в `bounce_visits`;
+- `page_depth` превращается в `pageviews`;
+- `time_on_site_seconds` превращается в `time_on_site_total`;
+- `robot_rate` превращается в `robot_visits`;
+- `goal_1 ... goal_25` суммируются как additive metrics;
+- даты и числа пишутся в Google Sheets типизированно, а не текстом.
+
 ## Current Canonical Header Mapping
 
 Нормализатор уже маппит:
@@ -225,29 +260,14 @@ Sparse-слой метрик:
 
 ### Goal Mapping Spreadsheet Sync
 
-Apps Script отдельно умеет синхронизировать лист `goal_mapping`.
+Goal mapping синхронизируется Python-скриптом, не Apps Script.
 
-Функция:
-
-- `syncGoalMappingSheet()`
-
-Что делает:
-
-- читает `public.goal_mapping_wide` через Supabase REST;
-- собирает grid:
-  - `Отчёт`
-  - `goal_1 ... goal_25`
-- полностью перезаписывает лист `goal_mapping` в spreadsheet `17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA`.
-
-Нужные script properties:
-
-- `SUPABASE_REST_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-
-Текущий CLI запуск:
+Текущие CLI-запуски:
 
 ```powershell
 python scripts\normalize_supabase.py --run-date 2026-04-06
+python scripts\sync_goal_mapping_sheet.py --spreadsheet-id 17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA --service-account-json key\service-account.json
+python scripts\sync_export_rows_wide_sheet.py --spreadsheet-id 17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA --service-account-json key\service-account.json
 ```
 
 ## Environment
@@ -278,7 +298,6 @@ select * from public.export_rows_wide limit 20;
 
 ## Git Status
 
-Эта рабочая папка сейчас не является git-репозиторием, поэтому коммит и push из неё невозможны, пока пользователь не:
+Рабочая папка является git-репозиторием и синхронизируется с:
 
-- либо инициализирует git прямо в `C:\visual projects\ym`;
-- либо перенесёт работу в правильный репозиторий с `.git`.
+- `https://github.com/Gogi213/ym`

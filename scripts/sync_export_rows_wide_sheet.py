@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -60,6 +60,15 @@ DISPLAY_COLUMN_NAMES = {
     "robot_rate": "robot_visits",
 }
 
+AGGREGATABLE_METRIC_COLUMNS = {
+    "visits",
+    "users",
+    "bounce_rate",
+    "page_depth",
+    "time_on_site_seconds",
+    "robot_rate",
+}
+
 
 def decimal_to_sheet_number(value: Decimal) -> int | float:
     if value == value.to_integral_value():
@@ -94,30 +103,35 @@ def transform_operator_record(record: Dict[str, Any]) -> Dict[str, Any]:
             transformed[column] = format_sheet_date(transformed[column])
 
     if transformed.get("bounce_rate") not in (None, ""):
-        transformed["bounce_rate"] = decimal_to_sheet_number(
-            visits * parse_decimal(transformed["bounce_rate"])
-        )
+        transformed["bounce_rate"] = visits * parse_decimal(transformed["bounce_rate"])
 
     if transformed.get("page_depth") not in (None, ""):
-        transformed["page_depth"] = decimal_to_sheet_number(
-            visits * parse_decimal(transformed["page_depth"])
-        )
+        transformed["page_depth"] = visits * parse_decimal(transformed["page_depth"])
 
     if transformed.get("robot_rate") not in (None, ""):
-        transformed["robot_rate"] = decimal_to_sheet_number(
-            visits * parse_decimal(transformed["robot_rate"])
-        )
+        transformed["robot_rate"] = visits * parse_decimal(transformed["robot_rate"])
 
     if transformed.get("time_on_site_seconds") not in (None, ""):
-        total_seconds = visits * parse_decimal(transformed["time_on_site_seconds"])
-        transformed["time_on_site_seconds"] = float(total_seconds / Decimal("86400"))
+        transformed["time_on_site_seconds"] = visits * parse_decimal(transformed["time_on_site_seconds"])
+
+    if transformed.get("visits") not in (None, ""):
+        transformed["visits"] = visits
+
+    if transformed.get("users") not in (None, ""):
+        transformed["users"] = parse_decimal(transformed["users"])
+
+    for key, value in list(transformed.items()):
+        if key.startswith("goal_") and value not in (None, ""):
+            transformed[key] = parse_decimal(value)
 
     return transformed
 
 
-def stringify_cell(value: Any) -> str:
+def stringify_cell(value: Any, column_name: str) -> str:
     if value is None:
         return ""
+    if column_name in DURATION_COLUMNS and isinstance(value, Decimal):
+        return float(value / Decimal("86400"))
     if isinstance(value, Decimal):
         return decimal_to_sheet_number(value)
     if isinstance(value, (dict, list)):
@@ -133,11 +147,71 @@ def build_display_columns(columns: List[str]) -> List[str]:
     return [DISPLAY_COLUMN_NAMES.get(column, column) for column in columns]
 
 
+def build_operator_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [transform_operator_record(record) for record in records]
+
+
+def build_aggregate_key(record: Dict[str, Any]) -> Tuple[Any, ...]:
+    key_parts: List[Any] = []
+    for key in sorted(record.keys()):
+        if key == "utm_term":
+            continue
+        if key in AGGREGATABLE_METRIC_COLUMNS:
+            continue
+        if key.startswith("goal_"):
+            continue
+        value = record.get(key)
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        key_parts.append((key, value))
+    return tuple(key_parts)
+
+
+def aggregate_operator_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+
+    for record in records:
+        key = build_aggregate_key(record)
+        current = grouped.get(key)
+        if current is None:
+            current = dict(record)
+            current["utm_term"] = "aggregated"
+            for metric_name in AGGREGATABLE_METRIC_COLUMNS:
+                current[metric_name] = None
+            for key_name in list(current.keys()):
+                if key_name.startswith("goal_"):
+                    current[key_name] = None
+            grouped[key] = current
+
+        for metric_name in AGGREGATABLE_METRIC_COLUMNS:
+            metric_value = record.get(metric_name)
+            if metric_value in (None, ""):
+                continue
+            current_value = current.get(metric_name)
+            if current_value in (None, ""):
+                current[metric_name] = metric_value
+            else:
+                current[metric_name] = current_value + metric_value
+
+        for key_name, value in record.items():
+            if not key_name.startswith("goal_"):
+                continue
+            if value in (None, ""):
+                continue
+            current_value = current.get(key_name)
+            if current_value in (None, ""):
+                current[key_name] = value
+            else:
+                current[key_name] = current_value + value
+
+    return list(grouped.values())
+
+
 def build_export_rows_grid(columns: List[str], records: List[Dict[str, Any]]) -> List[List[str]]:
     grid: List[List[str]] = [build_display_columns(columns)]
-    for record in records:
-        transformed = transform_operator_record(record)
-        grid.append([stringify_cell(transformed.get(column)) for column in columns])
+    projected_records = [{column: record.get(column) for column in columns} for record in records]
+    for record in aggregate_operator_records(build_operator_records(projected_records)):
+        grid.append([stringify_cell(record.get(column), column) for column in columns])
     return grid
 
 

@@ -9,7 +9,7 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 - [supabase/migrations](./supabase/migrations): database schema
 - [scripts/normalize_supabase.py](./scripts/normalize_supabase.py): raw -> normalized loader
 - [scripts/sync_goal_mapping_sheet.py](./scripts/sync_goal_mapping_sheet.py): goal slot mapping sync to sheet `отчеты`
-- [scripts/sync_export_rows_wide_sheet.py](./scripts/sync_export_rows_wide_sheet.py): wide union sync to sheet `union`
+- [scripts/sync_export_rows_wide_sheet.py](./scripts/sync_export_rows_wide_sheet.py): operator union sync to sheet `union`
 - [docs](./docs): business, technical, and deployment notes
 
 ## Runtime Shape
@@ -19,6 +19,10 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 3. Supabase stores raw files and extracted raw rows.
 4. Python normalizer builds canonical fact tables and `export_rows_wide`.
 5. Python sync scripts write operator views back to Google Sheets.
+6. `union` is not a raw wide dump. It is an operator-facing export:
+   - `utm_term` is fully collapsed to `aggregated`
+   - additive metrics are precomputed for aggregation
+   - dates and numbers are written as typed sheet values
 
 ## Local Commands
 
@@ -76,6 +80,25 @@ Apps Script:
 
 - `run()`: daily ingest for a single target date
 - `runMonthBackfill()`: backfill from month start to today, skipping dates already present in `public.ingest_files`
+
+Python:
+
+- `normalize_supabase.py`: rebuild normalized layer for a specific `run_date`
+- `sync_goal_mapping_sheet.py`: write goal slot labels to sheet `отчеты`
+- `sync_export_rows_wide_sheet.py`: write operator-facing `union`
+
+## Operator Union Semantics
+
+`union` is intentionally optimized for operators, not for raw audit.
+
+- `utm_term` is always collapsed to `aggregated`
+- grouping happens by all exported dimensions except `utm_term`
+- `bounce_visits = visits * bounce_rate`
+- `pageviews = visits * page_depth`
+- `time_on_site_total = visits * avg_time_on_site_seconds`
+- `robot_visits = visits * robot_rate`
+- `goal_1 ... goal_25` are additive in the export and remain topic-specific
+- raw detail remains in Supabase; only the sheet layer is collapsed
 
 ## Repository Notes
 
