@@ -53,6 +53,13 @@ DURATION_COLUMNS = {
 
 WRITE_BATCH_SIZE = 500
 
+DISPLAY_COLUMN_NAMES = {
+    "bounce_rate": "bounce_visits",
+    "page_depth": "pageviews",
+    "time_on_site_seconds": "time_on_site_total",
+    "robot_rate": "robot_visits",
+}
+
 
 def decimal_to_sheet_number(value: Decimal) -> int | float:
     if value == value.to_integral_value():
@@ -122,8 +129,12 @@ def filter_export_columns(columns: List[str]) -> List[str]:
     return [column for column in columns if column not in EXCLUDED_COLUMNS]
 
 
+def build_display_columns(columns: List[str]) -> List[str]:
+    return [DISPLAY_COLUMN_NAMES.get(column, column) for column in columns]
+
+
 def build_export_rows_grid(columns: List[str], records: List[Dict[str, Any]]) -> List[List[str]]:
-    grid: List[List[str]] = [list(columns)]
+    grid: List[List[str]] = [build_display_columns(columns)]
     for record in records:
         transformed = transform_operator_record(record)
         grid.append([stringify_cell(transformed.get(column)) for column in columns])
