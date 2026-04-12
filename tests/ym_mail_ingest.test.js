@@ -547,3 +547,50 @@ test('resolveSettingValue_ prefers script property over fallback', () => {
     'runtime-value'
   );
 });
+
+test('buildRunContext_ requires SUPABASE_INGEST_TOKEN from script properties', () => {
+  const runtime = {
+    Session: {
+      getScriptTimeZone() {
+        return 'Asia/Tbilisi';
+      }
+    },
+    SpreadsheetApp: {
+      openById() {
+        return {
+          getSheetByName() {
+            return {
+              getLastRow() {
+                return 2;
+              },
+              getRange() {
+                return {
+                  getDisplayValues() {
+                    return [['_SenSoy_']];
+                  }
+                };
+              }
+            };
+          }
+        };
+      }
+    },
+    PropertiesService: {
+      getScriptProperties() {
+        return {
+          getProperty(name) {
+            if (name === 'SUPABASE_FUNCTION_URL') {
+              return 'https://example.supabase.co/functions/v1/mail-ingest';
+            }
+            return '';
+          }
+        };
+      }
+    }
+  };
+
+  assert.throws(
+    () => ingest.buildRunContext_(runtime),
+    /Missing script property "SUPABASE_INGEST_TOKEN"/
+  );
+});

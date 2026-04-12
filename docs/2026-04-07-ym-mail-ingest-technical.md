@@ -73,11 +73,15 @@
 
 - [sync_goal_mapping_sheet.py](/C:/visual%20projects/ym/scripts/sync_goal_mapping_sheet.py)
 - [sync_export_rows_wide_sheet.py](/C:/visual%20projects/ym/scripts/sync_export_rows_wide_sheet.py)
+- [sync_pipeline_status_sheet.py](/C:/visual%20projects/ym/scripts/sync_pipeline_status_sheet.py)
+- [run_pipeline.py](/C:/visual%20projects/ym/scripts/run_pipeline.py)
 
 Ответственность:
 
 - писать goal mapping обратно в лист `отчеты`;
 - писать operator-facing `union` в отдельный лист;
+- писать operational status в лист `pipeline_status`;
+- оркестрировать `normalize + sheet sync` одной командой;
 - не трогать raw или normalized данные в БД.
 
 ## Raw Layer
@@ -224,6 +228,31 @@ Sparse-слой метрик:
 - `goal_1 ... goal_25` суммируются как additive metrics;
 - даты и числа пишутся в Google Sheets типизированно, а не текстом.
 
+## Pipeline Status Export
+
+Лист: `pipeline_status`
+
+Назначение:
+
+- показывать, какие `run_date` уже дошли до raw ingest;
+- показывать, какие `run_date` уже нормализованы;
+- давать оператору короткий статус без чтения SQL.
+
+Ключевые поля:
+
+- `run_date`
+- `pipeline_status`
+- `total_files`
+- `ingested_files`
+- `skipped_files`
+- `error_files`
+- `raw_rows`
+- `normalized_files`
+- `normalized_rows`
+- `first_message_at`
+- `last_message_at`
+- `normalized_at`
+
 ## Current Canonical Header Mapping
 
 Нормализатор уже маппит:
@@ -254,9 +283,12 @@ Sparse-слой метрик:
 Рекомендуемый порядок прогона:
 
 1. Apps Script грузит raw-слой за целевую дату.
-2. Python normalizer запускается за ту же `run_date`.
-3. `fact_rows_current_flags()` обновляет `is_current`.
-4. Spreadsheet export строится уже из `public.export_rows_wide`.
+2. `python scripts\run_pipeline.py --service-account-json ...` находит pending `run_date`.
+3. Orchestrator прогоняет `normalize_supabase.py` по нужным датам.
+4. Orchestrator синкает:
+   - `отчеты`
+   - `union`
+   - `pipeline_status`
 
 ### Goal Mapping Spreadsheet Sync
 
@@ -268,6 +300,8 @@ Goal mapping синхронизируется Python-скриптом, не Apps
 python scripts\normalize_supabase.py --run-date 2026-04-06
 python scripts\sync_goal_mapping_sheet.py --spreadsheet-id 17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA --service-account-json key\service-account.json
 python scripts\sync_export_rows_wide_sheet.py --spreadsheet-id 17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA --service-account-json key\service-account.json
+python scripts\sync_pipeline_status_sheet.py --spreadsheet-id 17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA --service-account-json key\service-account.json
+python scripts\run_pipeline.py --service-account-json key\service-account.json
 ```
 
 ## Environment

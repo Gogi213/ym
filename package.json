@@ -9,7 +9,9 @@
     "check:appsscript": "node --check Code.js",
     "normalize": "python scripts\\normalize_supabase.py",
     "sync:goals": "python scripts\\sync_goal_mapping_sheet.py",
-    "sync:union": "python scripts\\sync_export_rows_wide_sheet.py"
+    "sync:union": "python scripts\\sync_export_rows_wide_sheet.py",
+    "sync:status": "python scripts\\sync_pipeline_status_sheet.py",
+    "pipeline": "python scripts\\run_pipeline.py"
   },
   "devDependencies": {
     "supabase": "^2.85.0"

@@ -10,6 +10,8 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 - [scripts/normalize_supabase.py](./scripts/normalize_supabase.py): raw -> normalized loader
 - [scripts/sync_goal_mapping_sheet.py](./scripts/sync_goal_mapping_sheet.py): goal slot mapping sync to sheet `отчеты`
 - [scripts/sync_export_rows_wide_sheet.py](./scripts/sync_export_rows_wide_sheet.py): operator union sync to sheet `union`
+- [scripts/sync_pipeline_status_sheet.py](./scripts/sync_pipeline_status_sheet.py): pipeline status sync to sheet `pipeline_status`
+- [scripts/run_pipeline.py](./scripts/run_pipeline.py): one-command orchestrator for `normalize + sync`
 - [docs](./docs): business, technical, and deployment notes
 
 ## Runtime Shape
@@ -51,6 +53,13 @@ Sheets sync:
 ```powershell
 python scripts\sync_goal_mapping_sheet.py --spreadsheet-id 17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA --service-account-json key\service-account.json
 python scripts\sync_export_rows_wide_sheet.py --spreadsheet-id 17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA --service-account-json key\service-account.json
+python scripts\sync_pipeline_status_sheet.py --spreadsheet-id 17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA --service-account-json key\service-account.json
+```
+
+One-command post-ingest pipeline:
+
+```powershell
+python scripts\run_pipeline.py --service-account-json key\service-account.json
 ```
 
 ## Required Configuration
@@ -86,6 +95,8 @@ Python:
 - `normalize_supabase.py`: rebuild normalized layer for a specific `run_date`
 - `sync_goal_mapping_sheet.py`: write goal slot labels to sheet `отчеты`
 - `sync_export_rows_wide_sheet.py`: write operator-facing `union`
+- `sync_pipeline_status_sheet.py`: write run-level operational status to `pipeline_status`
+- `run_pipeline.py`: detect pending raw `run_date`, run normalization, then sync all operator sheets
 
 ## Operator Union Semantics
 
@@ -99,6 +110,26 @@ Python:
 - `robot_visits = visits * robot_rate`
 - `goal_1 ... goal_25` are additive in the export and remain topic-specific
 - raw detail remains in Supabase; only the sheet layer is collapsed
+
+## Pipeline Status Sheet
+
+`pipeline_status` is the operator/run-control layer.
+
+It shows per `run_date`:
+
+- `pipeline_status`
+- raw file counts
+- raw row counts
+- normalized file counts
+- normalized row counts
+- first/last message timestamps
+- latest normalization timestamp
+
+Current statuses:
+
+- `ready`
+- `pending_normalize`
+- `raw_only`
 
 ## Repository Notes
 

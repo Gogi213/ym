@@ -8,7 +8,6 @@ const CONFIG_ = {
   supabaseServiceRoleKeyProperty: 'SUPABASE_SERVICE_ROLE_KEY',
   verboseLoggingProperty: 'VERBOSE_LOGGING',
   supabaseFunctionUrl: 'https://jchvqvuudclgodsrhctb.supabase.co/functions/v1/mail-ingest',
-  supabaseIngestToken: '4EYKvpGLVNIyvyGiHxZtiCE6i9fPOH1kGlkJRAp6bZKjZEmgGeREg/JPPEAhs0ft',
   runDayOffset: -1,
   searchBatchSize: 100
 };
@@ -424,7 +423,7 @@ function getScriptSettings_(propertiesService) {
   );
   const ingestToken = resolveSettingValue_(
     scriptProperties.getProperty(CONFIG_.supabaseIngestTokenProperty),
-    CONFIG_.supabaseIngestToken,
+    '',
     CONFIG_.supabaseIngestTokenProperty
   );
 
