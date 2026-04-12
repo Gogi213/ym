@@ -1,0 +1,11 @@
+{
+  "name": "ym-mail-ingest",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "supabase": "^2.85.0"
+  }
+}

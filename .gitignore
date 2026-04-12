@@ -1,0 +1,9 @@
+node_modules/
+key/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+supabase/.temp/
+
+export_rows_wide*.csv
