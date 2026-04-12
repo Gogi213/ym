@@ -3,7 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "node --test"
+    "test": "npm run test:js && npm run test:py",
+    "test:js": "node --test",
+    "test:py": "python -m unittest discover -s tests -p \"test_*.py\" -v",
+    "check:appsscript": "node --check Code.js",
+    "normalize": "python scripts\\normalize_supabase.py",
+    "sync:goals": "python scripts\\sync_goal_mapping_sheet.py",
+    "sync:union": "python scripts\\sync_export_rows_wide_sheet.py"
   },
   "devDependencies": {
     "supabase": "^2.85.0"

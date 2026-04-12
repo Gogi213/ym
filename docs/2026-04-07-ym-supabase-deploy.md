@@ -104,6 +104,16 @@ select * from public.topic_goal_slots order by topic, goal_slot;
 select * from public.export_rows_wide limit 20;
 ```
 
-## 9. Git blocker
+## 9. Operator syncs
 
-Текущая папка `C:\visual projects\ym` не содержит `.git`, поэтому коммит и push отсюда невозможны до тех пор, пока пользователь не даст настоящий git-репозиторий или не инициализирует git в этой директории.
+Goal mapping back to sheet `отчеты`:
+
+```powershell
+python scripts\sync_goal_mapping_sheet.py --spreadsheet-id 17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA --service-account-json key\service-account.json
+```
+
+Wide union export to sheet `union`:
+
+```powershell
+python scripts\sync_export_rows_wide_sheet.py --spreadsheet-id 17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA --service-account-json key\service-account.json
+```

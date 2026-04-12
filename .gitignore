@@ -3,6 +3,9 @@ key/
 __pycache__/
 *.pyc
 *.pyo
+.venv/
+venv/
+.pytest_cache/
 .DS_Store
 supabase/.temp/
 
