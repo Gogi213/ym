@@ -242,6 +242,44 @@ function collectCandidateMessages_(threads, topicRules, runDate, timeZone) {
   return candidates;
 }
 
+function buildCandidatesByRunDate_(threads, topicRules, timeZone) {
+  const grouped = {};
+
+  for (let i = 0; i < threads.length; i++) {
+    const thread = threads[i];
+    const messages = thread.getMessages();
+
+    for (let j = 0; j < messages.length; j++) {
+      const message = messages[j];
+      const subject = String(message.getSubject() || '').trim();
+      const subjectReportDate = extractSubjectReportDate_(subject);
+      const effectiveRunDate = subjectReportDate || formatRunDate_(message.getDate(), timeZone);
+      const matchedTopic = findMatchedTopic_(subject, topicRules);
+
+      if (!matchedTopic) {
+        continue;
+      }
+
+      if (!grouped[effectiveRunDate]) {
+        grouped[effectiveRunDate] = [];
+      }
+
+      grouped[effectiveRunDate].push({
+        effectiveRunDate,
+        matchedTopic,
+        message,
+        messageDate: message.getDate(),
+        messageId: message.getId(),
+        subjectReportDate,
+        subject,
+        threadId: thread.getId()
+      });
+    }
+  }
+
+  return grouped;
+}
+
 function markLatestMessagesByTopic_(messages) {
   const latestByTopic = {};
 
@@ -514,12 +552,13 @@ function fetchRunDateExists_(urlFetchApp, settings, runDate) {
   return Array.isArray(response.json) && response.json.length > 0;
 }
 
-function runForDate_(runtime, runDate, startedAtMs, runContext) {
+function runForDate_(runtime, runDate, startedAtMs, runContext, options) {
   const context = runContext || buildRunContext_(runtime);
   const timeZone = context.timeZone;
   const topicRules = context.topicRules;
   const settings = context.settings;
-  const query = getMessageSearchQuery_(CONFIG_.runDayOffset);
+  const runOptions = options || {};
+  const query = runOptions.query || getMessageSearchQuery_(CONFIG_.runDayOffset);
   const runStartedPayload = {
     runDate,
     query,
@@ -531,21 +570,28 @@ function runForDate_(runtime, runDate, startedAtMs, runContext) {
   }
   logProgress_('run_started', runStartedPayload);
 
-  const threads = listThreadsForQuery_(runtime.GmailApp, query);
+  const threads = runOptions.preloadedCandidates
+    ? null
+    : listThreadsForQuery_(runtime.GmailApp, query);
+  const threadsScanned = runOptions.preloadedThreadsCount != null
+    ? Number(runOptions.preloadedThreadsCount)
+    : threads.length;
   logProgress_('threads_loaded', {
     runDate,
-    threadsScanned: threads.length,
+    threadsScanned,
     elapsedMs: elapsedMs_(startedAtMs)
   });
 
-  const allCandidates = collectCandidateMessages_(threads, topicRules, runDate, timeZone);
+  const allCandidates = runOptions.preloadedCandidates
+    ? runOptions.preloadedCandidates.slice()
+    : collectCandidateMessages_(threads, topicRules, runDate, timeZone);
   const candidates = markLatestMessagesByTopic_(allCandidates)
     .filter((candidate) => candidate.isLatestForTopic);
 
   const stats = {
     runDate,
     topicRules: topicRules.length,
-    threadsScanned: threads.length,
+    threadsScanned,
     matchedMessagesBeforeLatestFilter: allCandidates.length,
     matchedMessages: candidates.length,
     attachmentsSeen: 0,
@@ -675,9 +721,17 @@ function runMonthBackfill() {
   const runDates = listMonthRunDates_(targetRunDate);
   const backfillSettings = getBackfillSettings_(runtime.PropertiesService);
   const startedAtMs = Date.now();
+  const query = getMessageSearchQuery_(CONFIG_.runDayOffset);
+  const threads = listThreadsForQuery_(runtime.GmailApp, query);
+  const candidatesByRunDate = buildCandidatesByRunDate_(
+    threads,
+    runContext.topicRules,
+    runContext.timeZone
+  );
   const summary = {
     targetRunDate,
     totalDates: runDates.length,
+    threadsScanned: threads.length,
     processedDates: [],
     skippedExistingDates: [],
     failedDates: []
@@ -686,6 +740,8 @@ function runMonthBackfill() {
   logProgress_('month_backfill_started', {
     targetRunDate,
     runDates,
+    query,
+    threadsScanned: threads.length,
     skipExistingEnabled: backfillSettings.skipExistingEnabled,
     elapsedMs: elapsedMs_(startedAtMs)
   });
@@ -712,7 +768,21 @@ function runMonthBackfill() {
     }
 
     try {
-      runForDate_(runtime, runDate, startedAtMs, runContext);
+      const dayCandidates = candidatesByRunDate[runDate] || [];
+      if (!dayCandidates.length) {
+        summary.processedDates.push(runDate);
+        logProgress_('month_backfill_no_candidates', {
+          runDate,
+          elapsedMs: elapsedMs_(startedAtMs)
+        });
+        continue;
+      }
+
+      runForDate_(runtime, runDate, startedAtMs, runContext, {
+        query,
+        preloadedThreadsCount: threads.length,
+        preloadedCandidates: dayCandidates
+      });
       summary.processedDates.push(runDate);
     } catch (error) {
       summary.failedDates.push({

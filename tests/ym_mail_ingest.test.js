@@ -176,6 +176,56 @@ test('collectCandidateMessages_ prefers subject report date over message date', 
   assert.equal(result[0].matchedTopic, '_SenSoy_');
 });
 
+test('buildCandidatesByRunDate_ groups matched messages by effective run date', () => {
+  const messages = [
+    {
+      getDate() {
+        return new Date('2026-04-12T01:00:00Z');
+      },
+      getSubject() {
+        return 'Отчёт «_SenSoy_» за 11.04.2026';
+      },
+      getId() {
+        return 'msg-1';
+      }
+    },
+    {
+      getDate() {
+        return new Date('2026-04-12T02:00:00Z');
+      },
+      getSubject() {
+        return 'Отчёт «TW // Назонекс Аллерджи // Solta» за 10.04.2026';
+      },
+      getId() {
+        return 'msg-2';
+      }
+    }
+  ];
+  const thread = {
+    getMessages() {
+      return messages;
+    },
+    getId() {
+      return 'thr-1';
+    }
+  };
+
+  const grouped = ingest.buildCandidatesByRunDate_(
+    [thread],
+    [
+      { raw: '_SenSoy_', tokens: ['sensoy'] },
+      { raw: 'TW // Назонекс Аллерджи // Solta', tokens: ['tw', 'назонекс', 'аллерджи', 'solta'] }
+    ],
+    'Asia/Tbilisi'
+  );
+
+  assert.deepEqual(Object.keys(grouped).sort(), ['2026-04-10', '2026-04-11']);
+  assert.equal(grouped['2026-04-11'].length, 1);
+  assert.equal(grouped['2026-04-11'][0].matchedTopic, '_SenSoy_');
+  assert.equal(grouped['2026-04-10'].length, 1);
+  assert.equal(grouped['2026-04-10'][0].matchedTopic, 'TW // Назонекс Аллерджи // Solta');
+});
+
 test('formatRunDate_ formats date in target timezone', () => {
   assert.equal(
     ingest.formatRunDate_(new Date('2026-04-06T20:30:00Z'), 'Asia/Tbilisi'),

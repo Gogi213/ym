@@ -8,6 +8,7 @@ const EXPORT_NAMES = [
   'buildRunContext_',
   'buildResetPayload_',
   'buildSupabaseSelectRequest_',
+  'buildCandidatesByRunDate_',
   'chunkItems_',
   'compactText_',
   'collectCandidateMessages_',
