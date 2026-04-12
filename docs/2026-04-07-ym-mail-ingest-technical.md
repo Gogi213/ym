@@ -158,7 +158,6 @@ Sparse-слой измерений:
 - `utm_campaign`
 - `utm_content`
 - `utm_term`
-- `visit_date`
 
 ### fact_metrics
 
@@ -199,7 +198,6 @@ Sparse-слой метрик:
 - `UTM Campaign` -> `utm_campaign`
 - `UTM Content` -> `utm_content`
 - `UTM Term` -> `utm_term`
-- `Дата визита` -> `visit_date`
 - `Визиты` -> `visits`
 - `Посетители` -> `users`
 - `Отказы` -> `bounce_rate`
@@ -209,6 +207,8 @@ Sparse-слой метрик:
 - любой заголовок с вхождением `Роботность` -> `robot_rate`
 - любой заголовок с вхождением `Конверсия` -> игнорируется
 - любой заголовок с вхождением `Доход` -> `goal_N` по topic-slot mapping
+
+`Дата визита` больше не хранится отдельной dimension-колонкой. Если она есть в исходной строке, нормализатор использует её только для расчёта `report_date`.
 - `Товаров куплено (...)` -> `goal_N` по topic-slot mapping
 - `Посетители, купившие товар (...)` -> `goal_N` по topic-slot mapping
 - `Достижения избранных целей` -> `goal_N` по topic-slot mapping

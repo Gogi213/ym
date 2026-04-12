@@ -23,7 +23,6 @@ HEADER_ALIASES: Dict[str, Tuple[str, str]] = {
     "utm_campaign": ("dimension", "utm_campaign"),
     "utm_content": ("dimension", "utm_content"),
     "utm_term": ("dimension", "utm_term"),
-    "дата_визита": ("dimension", "visit_date"),
     "визиты": ("metric", "visits"),
     "посетители": ("metric", "users"),
     "отказы": ("metric", "bounce_rate"),
@@ -237,7 +236,7 @@ def build_fact_payload(
     report_date = extract_report_date(row=row, message_date=message_date)
     report_date_from = report_date
     report_date_to = report_date
-    if "visit_date" not in dimensions and file_report_period is not None:
+    if file_report_period is not None and not str(row.get("Дата визита", "")).strip():
         report_date_from, report_date_to = file_report_period
         report_date = report_date_from
     row_hash_payload = {

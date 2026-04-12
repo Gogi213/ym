@@ -125,7 +125,6 @@ class NormalizeSupabaseTests(unittest.TestCase):
                 "utm_campaign": "organon_tw_solta_cpm_banner",
                 "utm_content": "banner",
                 "utm_term": "term-1",
-                "visit_date": "2026-04-05",
             },
         )
         self.assertEqual(payload["metrics"]["visits"], Decimal("1.0"))
