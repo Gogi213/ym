@@ -538,6 +538,22 @@ def merge_secondary_payloads_into_primary(
     }
 
 
+def build_pipeline_run_ready_update(*, files_count: int, fact_rows_count: int) -> Dict[str, Any]:
+    return {
+        "normalized_files": files_count,
+        "normalized_rows": fact_rows_count,
+        "normalize_status": "ready",
+        "last_error": None,
+    }
+
+
+def build_pipeline_run_error_update(error_message: str) -> Dict[str, Any]:
+    return {
+        "normalize_status": "normalize_error",
+        "last_error": error_message,
+    }
+
+
 def build_normalized_payloads(
     files: Sequence[Dict[str, Any]],
     rows_by_file_id: Dict[str, List[Dict[str, Any]]],
@@ -656,6 +672,50 @@ def replace_normalized_rows_for_run(conn, run_date: str) -> None:
         )
 
 
+def mark_pipeline_run_ready(conn, run_date: str, *, files_count: int, fact_rows_count: int) -> None:
+    payload = build_pipeline_run_ready_update(
+        files_count=files_count,
+        fact_rows_count=fact_rows_count,
+    )
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            update public.pipeline_runs
+            set
+              normalized_files = %(normalized_files)s,
+              normalized_rows = %(normalized_rows)s,
+              normalize_status = %(normalize_status)s,
+              normalized_at = timezone('utc', now()),
+              last_error = %(last_error)s,
+              updated_at = timezone('utc', now())
+            where run_date = %(run_date)s
+            """,
+            {
+                "run_date": run_date,
+                **payload,
+            },
+        )
+
+
+def mark_pipeline_run_error(conn, run_date: str, error_message: str) -> None:
+    payload = build_pipeline_run_error_update(error_message)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            update public.pipeline_runs
+            set
+              normalize_status = %(normalize_status)s,
+              last_error = %(last_error)s,
+              updated_at = timezone('utc', now())
+            where run_date = %(run_date)s
+            """,
+            {
+                "run_date": run_date,
+                **payload,
+            },
+        )
+
+
 def upsert_topic_goal_slots(conn, records: Sequence[Dict[str, Any]]) -> None:
     if not records:
         return
@@ -753,9 +813,210 @@ def insert_fact_metrics(conn, rows: Sequence[Dict[str, Any]]) -> None:
     )
 
 
-def refresh_current_flags(conn) -> None:
+def refresh_current_flags_for_topics(conn, topics: Sequence[str]) -> None:
+    topic_list = sorted({str(topic or "").strip() for topic in topics if str(topic or "").strip()})
+    if not topic_list:
+        return
+
     with conn.cursor() as cur:
-        cur.execute("select public.refresh_fact_rows_current_flags()")
+        cur.execute(
+            """
+            with ranked as (
+              select
+                fr.fact_row_id,
+                row_number() over (
+                  partition by fr.topic, fr.row_hash
+                  order by fr.message_date desc nulls last, fr.created_at desc, fr.source_file_id desc
+                ) as rn
+              from public.fact_rows fr
+              where fr.topic = any(%s)
+            )
+            update public.fact_rows fr
+            set is_current = (ranked.rn = 1)
+            from ranked
+            where ranked.fact_row_id = fr.fact_row_id
+            """,
+            (topic_list,),
+        )
+
+
+def refresh_operator_export_rows_for_run(conn, run_date: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            delete from public.operator_export_rows
+            where run_date = %s
+            """,
+            (run_date,),
+        )
+        cur.execute(
+            """
+            with target_rows as (
+              select
+                fr.fact_row_id,
+                f.run_date,
+                fr.topic,
+                fr.report_date,
+                fr.report_date_from,
+                fr.report_date_to
+              from public.fact_rows fr
+              join public.ingest_files f
+                on f.id = fr.source_file_id
+              where fr.is_current = true
+                and f.run_date = %s
+            ),
+            dimension_pivot as (
+              select
+                fd.fact_row_id,
+                max(case when fd.dimension_key = 'utm_source' then fd.dimension_value end) as utm_source,
+                max(case when fd.dimension_key = 'utm_medium' then fd.dimension_value end) as utm_medium,
+                max(case when fd.dimension_key = 'utm_campaign' then fd.dimension_value end) as utm_campaign
+              from public.fact_dimensions fd
+              join target_rows tr
+                on tr.fact_row_id = fd.fact_row_id
+              group by fd.fact_row_id
+            ),
+            metric_pivot as (
+              select
+                fm.fact_row_id,
+                max(case when fm.metric_key = 'visits' then fm.metric_value end) as visits,
+                max(case when fm.metric_key = 'users' then fm.metric_value end) as users,
+                max(case when fm.metric_key = 'bounce_rate' then fm.metric_value end) as bounce_rate,
+                max(case when fm.metric_key = 'page_depth' then fm.metric_value end) as page_depth,
+                max(case when fm.metric_key = 'time_on_site_seconds' then fm.metric_value end) as time_on_site_seconds,
+                max(case when fm.metric_key = 'robot_rate' then fm.metric_value end) as robot_rate,
+                max(case when fm.metric_key = 'goal_1' then fm.metric_value end) as goal_1,
+                max(case when fm.metric_key = 'goal_2' then fm.metric_value end) as goal_2,
+                max(case when fm.metric_key = 'goal_3' then fm.metric_value end) as goal_3,
+                max(case when fm.metric_key = 'goal_4' then fm.metric_value end) as goal_4,
+                max(case when fm.metric_key = 'goal_5' then fm.metric_value end) as goal_5,
+                max(case when fm.metric_key = 'goal_6' then fm.metric_value end) as goal_6,
+                max(case when fm.metric_key = 'goal_7' then fm.metric_value end) as goal_7,
+                max(case when fm.metric_key = 'goal_8' then fm.metric_value end) as goal_8,
+                max(case when fm.metric_key = 'goal_9' then fm.metric_value end) as goal_9,
+                max(case when fm.metric_key = 'goal_10' then fm.metric_value end) as goal_10,
+                max(case when fm.metric_key = 'goal_11' then fm.metric_value end) as goal_11,
+                max(case when fm.metric_key = 'goal_12' then fm.metric_value end) as goal_12,
+                max(case when fm.metric_key = 'goal_13' then fm.metric_value end) as goal_13,
+                max(case when fm.metric_key = 'goal_14' then fm.metric_value end) as goal_14,
+                max(case when fm.metric_key = 'goal_15' then fm.metric_value end) as goal_15,
+                max(case when fm.metric_key = 'goal_16' then fm.metric_value end) as goal_16,
+                max(case when fm.metric_key = 'goal_17' then fm.metric_value end) as goal_17,
+                max(case when fm.metric_key = 'goal_18' then fm.metric_value end) as goal_18,
+                max(case when fm.metric_key = 'goal_19' then fm.metric_value end) as goal_19,
+                max(case when fm.metric_key = 'goal_20' then fm.metric_value end) as goal_20,
+                max(case when fm.metric_key = 'goal_21' then fm.metric_value end) as goal_21,
+                max(case when fm.metric_key = 'goal_22' then fm.metric_value end) as goal_22,
+                max(case when fm.metric_key = 'goal_23' then fm.metric_value end) as goal_23,
+                max(case when fm.metric_key = 'goal_24' then fm.metric_value end) as goal_24,
+                max(case when fm.metric_key = 'goal_25' then fm.metric_value end) as goal_25
+              from public.fact_metrics fm
+              join target_rows tr
+                on tr.fact_row_id = fm.fact_row_id
+              group by fm.fact_row_id
+            )
+            insert into public.operator_export_rows (
+              run_date,
+              topic,
+              report_date,
+              report_date_from,
+              report_date_to,
+              utm_source,
+              utm_medium,
+              utm_campaign,
+              utm_content,
+              utm_term,
+              visits,
+              users,
+              bounce_rate,
+              page_depth,
+              time_on_site_seconds,
+              robot_rate,
+              goal_1,
+              goal_2,
+              goal_3,
+              goal_4,
+              goal_5,
+              goal_6,
+              goal_7,
+              goal_8,
+              goal_9,
+              goal_10,
+              goal_11,
+              goal_12,
+              goal_13,
+              goal_14,
+              goal_15,
+              goal_16,
+              goal_17,
+              goal_18,
+              goal_19,
+              goal_20,
+              goal_21,
+              goal_22,
+              goal_23,
+              goal_24,
+              goal_25
+            )
+            select
+              tr.run_date,
+              tr.topic,
+              tr.report_date,
+              tr.report_date_from,
+              tr.report_date_to,
+              dp.utm_source,
+              dp.utm_medium,
+              dp.utm_campaign,
+              'aggregated'::text as utm_content,
+              'aggregated'::text as utm_term,
+              sum(mp.visits) as visits,
+              sum(mp.users) as users,
+              sum(case when mp.bounce_rate is not null then mp.bounce_rate * mp.visits end) as bounce_rate,
+              sum(case when mp.page_depth is not null then mp.page_depth * mp.visits end) as page_depth,
+              sum(case when mp.time_on_site_seconds is not null then mp.time_on_site_seconds * mp.visits end) as time_on_site_seconds,
+              sum(case when mp.robot_rate is not null then mp.robot_rate * mp.visits end) as robot_rate,
+              sum(mp.goal_1) as goal_1,
+              sum(mp.goal_2) as goal_2,
+              sum(mp.goal_3) as goal_3,
+              sum(mp.goal_4) as goal_4,
+              sum(mp.goal_5) as goal_5,
+              sum(mp.goal_6) as goal_6,
+              sum(mp.goal_7) as goal_7,
+              sum(mp.goal_8) as goal_8,
+              sum(mp.goal_9) as goal_9,
+              sum(mp.goal_10) as goal_10,
+              sum(mp.goal_11) as goal_11,
+              sum(mp.goal_12) as goal_12,
+              sum(mp.goal_13) as goal_13,
+              sum(mp.goal_14) as goal_14,
+              sum(mp.goal_15) as goal_15,
+              sum(mp.goal_16) as goal_16,
+              sum(mp.goal_17) as goal_17,
+              sum(mp.goal_18) as goal_18,
+              sum(mp.goal_19) as goal_19,
+              sum(mp.goal_20) as goal_20,
+              sum(mp.goal_21) as goal_21,
+              sum(mp.goal_22) as goal_22,
+              sum(mp.goal_23) as goal_23,
+              sum(mp.goal_24) as goal_24,
+              sum(mp.goal_25) as goal_25
+            from target_rows tr
+            left join dimension_pivot dp
+              on dp.fact_row_id = tr.fact_row_id
+            left join metric_pivot mp
+              on mp.fact_row_id = tr.fact_row_id
+            group by
+              tr.run_date,
+              tr.topic,
+              tr.report_date,
+              tr.report_date_from,
+              tr.report_date_to,
+              dp.utm_source,
+              dp.utm_medium,
+              dp.utm_campaign
+            """,
+            (run_date,),
+        )
 
 
 def normalize_run(
@@ -777,75 +1038,95 @@ def normalize_run(
 
     phase("normalize_connecting")
     with connect_db() as conn:
-        phase("normalize_fetch_ingested_files_started")
-        files = fetch_ingested_files(conn, run_date)
-        phase("normalize_fetch_ingested_files_finished", files=len(files))
-        topics = sorted({file_row["matched_topic"] for file_row in files})
-        file_ids = [str(file_row["id"]) for file_row in files]
+        try:
+            phase("normalize_fetch_ingested_files_started")
+            files = fetch_ingested_files(conn, run_date)
+            phase("normalize_fetch_ingested_files_finished", files=len(files))
+            topics = sorted({file_row["matched_topic"] for file_row in files})
+            file_ids = [str(file_row["id"]) for file_row in files]
 
-        phase("normalize_fetch_rows_started", file_ids=len(file_ids))
-        rows_by_file_id = fetch_ingest_rows(conn, file_ids)
-        phase(
-            "normalize_fetch_rows_finished",
-            files_with_rows=len(rows_by_file_id),
-            raw_rows=sum(len(rows) for rows in rows_by_file_id.values()),
-        )
-        phase("normalize_fetch_payloads_started", file_ids=len(file_ids))
-        payloads_by_file_id = fetch_ingest_payloads(conn, file_ids)
-        phase("normalize_fetch_payloads_finished", payloads=len(payloads_by_file_id))
-        phase("normalize_fetch_goal_slots_started", topics=len(topics))
-        existing_goal_slots = fetch_existing_goal_slots(conn, topics)
-        phase("normalize_fetch_goal_slots_finished", topics_with_slots=len(existing_goal_slots))
+            phase("normalize_fetch_rows_started", file_ids=len(file_ids))
+            rows_by_file_id = fetch_ingest_rows(conn, file_ids)
+            phase(
+                "normalize_fetch_rows_finished",
+                files_with_rows=len(rows_by_file_id),
+                raw_rows=sum(len(rows) for rows in rows_by_file_id.values()),
+            )
+            phase("normalize_fetch_payloads_started", file_ids=len(file_ids))
+            payloads_by_file_id = fetch_ingest_payloads(conn, file_ids)
+            phase("normalize_fetch_payloads_finished", payloads=len(payloads_by_file_id))
+            phase("normalize_fetch_goal_slots_started", topics=len(topics))
+            existing_goal_slots = fetch_existing_goal_slots(conn, topics)
+            phase("normalize_fetch_goal_slots_finished", topics_with_slots=len(existing_goal_slots))
 
-        phase("normalize_collect_goal_slots_started")
-        goal_slots_by_topic, first_seen_file_ids = collect_goal_slots(files, existing_goal_slots)
-        phase(
-            "normalize_collect_goal_slots_finished",
-            topics=len(goal_slots_by_topic),
-            slots=sum(len(topic_slots) for topic_slots in goal_slots_by_topic.values()),
-        )
-        phase("normalize_build_goal_slot_records_started")
-        topic_goal_slot_records = build_topic_goal_slot_records(
-            goal_slots_by_topic=goal_slots_by_topic,
-            first_seen_file_ids=first_seen_file_ids,
-        )
-        phase("normalize_build_goal_slot_records_finished", goal_slot_records=len(topic_goal_slot_records))
-        phase("normalize_build_payloads_started")
-        fact_rows, fact_dimensions, fact_metrics, secondary_merge_stats = build_normalized_payloads(
-            files,
-            rows_by_file_id,
-            payloads_by_file_id,
-            goal_slots_by_topic,
-        )
-        phase(
-            "normalize_build_payloads_finished",
-            fact_rows=len(fact_rows),
-            fact_dimensions=len(fact_dimensions),
-            fact_metrics=len(fact_metrics),
-            **secondary_merge_stats,
-        )
+            phase("normalize_collect_goal_slots_started")
+            goal_slots_by_topic, first_seen_file_ids = collect_goal_slots(files, existing_goal_slots)
+            phase(
+                "normalize_collect_goal_slots_finished",
+                topics=len(goal_slots_by_topic),
+                slots=sum(len(topic_slots) for topic_slots in goal_slots_by_topic.values()),
+            )
+            phase("normalize_build_goal_slot_records_started")
+            topic_goal_slot_records = build_topic_goal_slot_records(
+                goal_slots_by_topic=goal_slots_by_topic,
+                first_seen_file_ids=first_seen_file_ids,
+            )
+            phase("normalize_build_goal_slot_records_finished", goal_slot_records=len(topic_goal_slot_records))
+            phase("normalize_build_payloads_started")
+            fact_rows, fact_dimensions, fact_metrics, secondary_merge_stats = build_normalized_payloads(
+                files,
+                rows_by_file_id,
+                payloads_by_file_id,
+                goal_slots_by_topic,
+            )
+            phase(
+                "normalize_build_payloads_finished",
+                fact_rows=len(fact_rows),
+                fact_dimensions=len(fact_dimensions),
+                fact_metrics=len(fact_metrics),
+                **secondary_merge_stats,
+            )
 
-        phase("normalize_replace_rows_started")
-        replace_normalized_rows_for_run(conn, run_date)
-        phase("normalize_replace_rows_finished")
-        phase("normalize_upsert_goal_slots_started", goal_slot_records=len(topic_goal_slot_records))
-        upsert_topic_goal_slots(conn, topic_goal_slot_records)
-        phase("normalize_upsert_goal_slots_finished")
-        phase("normalize_insert_fact_rows_started", fact_rows=len(fact_rows))
-        insert_fact_rows(conn, fact_rows)
-        phase("normalize_insert_fact_rows_finished")
-        phase("normalize_insert_fact_dimensions_started", fact_dimensions=len(fact_dimensions))
-        insert_fact_dimensions(conn, fact_dimensions)
-        phase("normalize_insert_fact_dimensions_finished")
-        phase("normalize_insert_fact_metrics_started", fact_metrics=len(fact_metrics))
-        insert_fact_metrics(conn, fact_metrics)
-        phase("normalize_insert_fact_metrics_finished")
-        phase("normalize_refresh_flags_started")
-        refresh_current_flags(conn)
-        phase("normalize_refresh_flags_finished")
-        phase("normalize_commit_started")
-        conn.commit()
-        phase("normalize_commit_finished")
+            phase("normalize_replace_rows_started")
+            replace_normalized_rows_for_run(conn, run_date)
+            phase("normalize_replace_rows_finished")
+            phase("normalize_upsert_goal_slots_started", goal_slot_records=len(topic_goal_slot_records))
+            upsert_topic_goal_slots(conn, topic_goal_slot_records)
+            phase("normalize_upsert_goal_slots_finished")
+            phase("normalize_insert_fact_rows_started", fact_rows=len(fact_rows))
+            insert_fact_rows(conn, fact_rows)
+            phase("normalize_insert_fact_rows_finished")
+            phase("normalize_insert_fact_dimensions_started", fact_dimensions=len(fact_dimensions))
+            insert_fact_dimensions(conn, fact_dimensions)
+            phase("normalize_insert_fact_dimensions_finished")
+            phase("normalize_insert_fact_metrics_started", fact_metrics=len(fact_metrics))
+            insert_fact_metrics(conn, fact_metrics)
+            phase("normalize_insert_fact_metrics_finished")
+            phase("normalize_refresh_flags_started")
+            refresh_current_flags_for_topics(
+                conn,
+                topics=[file_row.get("primary_topic") or file_row["matched_topic"] for file_row in files],
+            )
+            phase("normalize_refresh_flags_finished")
+            phase("normalize_refresh_operator_export_started")
+            refresh_operator_export_rows_for_run(conn, run_date)
+            phase("normalize_refresh_operator_export_finished")
+            phase("normalize_mark_ready_started")
+            mark_pipeline_run_ready(
+                conn,
+                run_date,
+                files_count=len(files),
+                fact_rows_count=len(fact_rows),
+            )
+            phase("normalize_mark_ready_finished")
+            phase("normalize_commit_started")
+            conn.commit()
+            phase("normalize_commit_finished")
+        except Exception as error:
+            conn.rollback()
+            mark_pipeline_run_error(conn, run_date, str(error))
+            conn.commit()
+            raise
 
     result = {
         "files": len(files),

@@ -518,6 +518,87 @@ function getSupabaseAdmin() {
   return createClient(url, serviceRoleKey)
 }
 
+async function markPipelineRunAfterReset(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  runDate: string,
+) {
+  const { data: existing, error: fetchError } = await supabase
+    .from('pipeline_runs')
+    .select('raw_revision')
+    .eq('run_date', runDate)
+    .maybeSingle()
+
+  if (fetchError) {
+    throw fetchError
+  }
+
+  const nextRevision = Number(existing?.raw_revision || 0) + 1
+  const { error } = await supabase.from('pipeline_runs').upsert(
+    {
+      run_date: runDate,
+      raw_revision: nextRevision,
+      normalize_status: 'pending_normalize',
+      raw_files: 0,
+      raw_rows: 0,
+      normalized_files: 0,
+      normalized_rows: 0,
+      last_ingest_at: new Date().toISOString(),
+      normalized_at: null,
+      last_error: null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'run_date' },
+  )
+
+  if (error) {
+    throw error
+  }
+}
+
+async function refreshPipelineRunAfterIngest(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  runDate: string,
+) {
+  const { data: files, error: filesError } = await supabase
+    .from('ingest_files')
+    .select('status,row_count')
+    .eq('run_date', runDate)
+
+  if (filesError) {
+    throw filesError
+  }
+
+  const totalFiles = Array.isArray(files) ? files.length : 0
+  let ingestedFiles = 0
+  let rawRows = 0
+
+  for (const file of files || []) {
+    if (file.status === 'ingested') {
+      ingestedFiles += 1
+      rawRows += Number(file.row_count || 0)
+    }
+  }
+
+  const { error } = await supabase
+    .from('pipeline_runs')
+    .update({
+      raw_files: totalFiles,
+      raw_rows: rawRows,
+      normalized_files: 0,
+      normalized_rows: 0,
+      normalize_status: ingestedFiles > 0 ? 'pending_normalize' : 'raw_only',
+      last_ingest_at: new Date().toISOString(),
+      normalized_at: null,
+      last_error: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('run_date', runDate)
+
+  if (error) {
+    throw error
+  }
+}
+
 function assertAuthorized(req: Request) {
   const expectedToken = Deno.env.get('INGEST_TOKEN') || ''
   const actualToken = req.headers.get('x-ingest-token') || ''
@@ -612,6 +693,8 @@ async function handleReset(req: Request) {
   if (error) {
     throw error
   }
+
+  await markPipelineRunAfterReset(supabase, runDate)
 
   return jsonResponse({
     ok: true,
@@ -709,6 +792,8 @@ async function handleIngest(req: Request) {
       }
     }
 
+    await refreshPipelineRunAfterIngest(supabase, meta.run_date)
+
     return jsonResponse({
       ok: true,
       status,
@@ -724,6 +809,7 @@ async function handleIngest(req: Request) {
         .from('ingest_files')
         .update({ status: 'error', error_text: message })
         .eq('id', fileId)
+      await refreshPipelineRunAfterIngest(supabase, meta.run_date)
     } else {
       await insertFileRecord(
         supabase,
@@ -734,6 +820,7 @@ async function handleIngest(req: Request) {
         0,
         message,
       )
+      await refreshPipelineRunAfterIngest(supabase, meta.run_date)
     }
 
     return jsonResponse({

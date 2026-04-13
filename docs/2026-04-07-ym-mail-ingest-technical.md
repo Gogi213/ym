@@ -12,6 +12,7 @@
 - `Supabase raw tables`
 - `Python normalizer`
 - `Supabase export view`
+- `Supabase operator export cache`
 - `Python operator sheet sync`
 
 Что уже реализовано:
@@ -73,6 +74,7 @@
 - стабильно назначать `goal_N` по теме;
 - приклеивать secondary-строки к primary-строкам только по точному grain;
 - строить normalized слой и wide export-view.
+- пересчитывать `public.operator_export_rows` только для затронутого `run_date`.
 
 Правило merge secondary в primary:
 
@@ -132,6 +134,7 @@
 - `public.fact_dimensions`
 - `public.fact_metrics`
 - `public.export_rows_wide`
+- `public.operator_export_rows`
 
 ### topic_goal_slots
 
@@ -237,6 +240,22 @@ Sparse-слой метрик:
 - операторский лист `union` строится поверх него отдельным Python-экспортом;
 - `union` не является 1:1 копией `export_rows_wide`.
 
+## Operator Export Cache
+
+Таблица: `public.operator_export_rows`
+
+Назначение:
+
+- хранить уже агрегированный операторский слой для `union`;
+- не пересчитывать operator aggregation на каждый sheet sync с нуля;
+- обновляться только для dirty `run_date` внутри normalizer.
+
+Это отдельный cache-layer:
+
+- source of truth остаётся в `fact_*` и `export_rows_wide`;
+- `operator_export_rows` нужен только для быстрого operator sync;
+- Python больше не тянет десятки тысяч wide-строк в память ради одного листа.
+
 ## Operator Union Export
 
 Лист: `union`
@@ -244,6 +263,7 @@ Sparse-слой метрик:
 Экспорт строится Python-скриптом и отличается от DB-wide слоя:
 
 - `utm_term` всегда схлопывается в `aggregated`;
+- `utm_content` всегда схлопывается в `aggregated`;
 - grouping идёт по всем остальным экспортируемым dimensions;
 - `bounce_rate` превращается в `bounce_visits`;
 - `page_depth` превращается в `pageviews`;
@@ -326,6 +346,8 @@ Sparse-слой метрик:
 
 - raw ingest уже сейчас может давать десятки тысяч строк;
 - normalizer пересобирает каждый pending `run_date` отдельно;
+- `is_current` теперь пересчитывается только по темам dirty-дня, а не по всей таблице;
+- operator cache пересчитывается только по dirty `run_date`;
 - после нормализации Python ещё синкает три листа:
   - `отчеты`
   - `union`
@@ -338,7 +360,7 @@ Sparse-слой метрик:
 - правильнее запускать точечно `normalize_supabase.py --run-date ...` и проверять нужный срез отдельно.
 
 Это не считается багом пайплайна само по себе.
-Это текущая стоимость полного rebuild без смены архитектуры.
+Это текущая стоимость инкрементального rebuild без полного пересчёта уже готовых дней.
 
 ### Goal Mapping Spreadsheet Sync
 

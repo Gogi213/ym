@@ -5,25 +5,40 @@ from scripts.sync_pipeline_status_sheet import build_pipeline_status_grid, class
 
 
 class SyncPipelineStatusSheetTests(unittest.TestCase):
-    def test_classify_pipeline_status_marks_ready_when_normalized_rows_match_raw_rows(self):
+    def test_classify_pipeline_status_prefers_explicit_ready_status(self):
         self.assertEqual(
             classify_pipeline_status(
                 {
+                    "normalize_status": "ready",
                     "ingested_files": 6,
                     "raw_rows": 473,
-                    "normalized_rows": 473,
+                    "normalized_rows": 100,
                 }
             ),
             "ready",
         )
 
-    def test_classify_pipeline_status_keeps_pending_when_rows_are_missing(self):
+    def test_classify_pipeline_status_marks_raw_only_when_explicit(self):
         self.assertEqual(
             classify_pipeline_status(
                 {
+                    "normalize_status": "raw_only",
                     "ingested_files": 6,
                     "raw_rows": 473,
-                    "normalized_rows": 400,
+                    "normalized_rows": 473,
+                }
+            ),
+            "raw_only",
+        )
+
+    def test_classify_pipeline_status_marks_pending_when_explicit(self):
+        self.assertEqual(
+            classify_pipeline_status(
+                {
+                    "normalize_status": "pending_normalize",
+                    "ingested_files": 6,
+                    "raw_rows": 473,
+                    "normalized_rows": 473,
                 }
             ),
             "pending_normalize",

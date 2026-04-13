@@ -33,14 +33,13 @@ def format_date_cell(value: Any) -> str:
 
 
 def classify_pipeline_status(record: Dict[str, Any]) -> str:
-    ingested_files = int(record.get("ingested_files") or 0)
-    raw_rows = int(record.get("raw_rows") or 0)
-    normalized_rows = int(record.get("normalized_rows") or 0)
+    explicit_status = str(record.get("normalize_status") or "").strip()
+    if explicit_status:
+        return explicit_status
 
+    ingested_files = int(record.get("ingested_files") or 0)
     if ingested_files <= 0:
         return "raw_only"
-    if normalized_rows >= raw_rows:
-        return "ready"
     return "pending_normalize"
 
 
@@ -49,7 +48,21 @@ def fetch_pipeline_status_records() -> List[Dict[str, Any]]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                with ingest_summary as (
+                with run_state as (
+                  select
+                    pr.run_date,
+                    pr.raw_revision,
+                    pr.normalize_status,
+                    pr.raw_files,
+                    pr.raw_rows,
+                    pr.normalized_files,
+                    pr.normalized_rows,
+                    pr.last_ingest_at,
+                    pr.normalized_at,
+                    pr.last_error
+                  from public.pipeline_runs pr
+                ),
+                ingest_summary as (
                   select
                     f.run_date,
                     count(*) as total_files,
@@ -73,20 +86,24 @@ def fetch_pipeline_status_records() -> List[Dict[str, Any]]:
                   group by f.run_date
                 )
                 select
-                  i.run_date,
-                  i.total_files,
-                  i.ingested_files,
-                  i.skipped_files,
-                  i.error_files,
-                  i.raw_rows,
-                  coalesce(n.normalized_files, 0) as normalized_files,
-                  coalesce(n.normalized_rows, 0) as normalized_rows,
-                  i.first_message_at,
-                  i.last_message_at,
-                  n.normalized_at
-                from ingest_summary i
-                left join normalized_summary n on n.run_date = i.run_date
-                order by i.run_date desc
+                  rs.run_date,
+                  rs.raw_revision,
+                  rs.normalize_status,
+                  coalesce(i.total_files, rs.raw_files, 0) as total_files,
+                  coalesce(i.ingested_files, 0) as ingested_files,
+                  coalesce(i.skipped_files, 0) as skipped_files,
+                  coalesce(i.error_files, 0) as error_files,
+                  coalesce(rs.raw_rows, i.raw_rows, 0) as raw_rows,
+                  coalesce(rs.normalized_files, n.normalized_files, 0) as normalized_files,
+                  coalesce(rs.normalized_rows, n.normalized_rows, 0) as normalized_rows,
+                  coalesce(i.first_message_at, rs.last_ingest_at) as first_message_at,
+                  coalesce(i.last_message_at, rs.last_ingest_at) as last_message_at,
+                  coalesce(rs.normalized_at, n.normalized_at) as normalized_at,
+                  rs.last_error
+                from run_state rs
+                left join ingest_summary i on i.run_date = rs.run_date
+                left join normalized_summary n on n.run_date = rs.run_date
+                order by rs.run_date desc
                 """
             )
             records = list(cur.fetchall())

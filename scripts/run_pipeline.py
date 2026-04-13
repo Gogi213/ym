@@ -26,7 +26,8 @@ def log_progress(phase: str, payload: Dict[str, Any]) -> None:
 def select_pending_run_dates(records: List[Dict[str, Any]]) -> List[str]:
     pending: List[str] = []
     for record in records:
-        if str(record.get("pipeline_status") or "") != "pending_normalize":
+        normalize_status = str(record.get("normalize_status") or record.get("pipeline_status") or "")
+        if normalize_status not in {"pending_normalize", "normalize_error"}:
             continue
         run_date = str(record.get("run_date") or "")
         if run_date:

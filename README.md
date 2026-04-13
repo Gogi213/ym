@@ -24,7 +24,8 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 4. Python normalizer builds canonical fact tables and `export_rows_wide`.
    - secondary topics do not become standalone operator topics
    - they are attached to their `primary_topic` only when the exact grain matches
-5. Python sync scripts write operator views back to Google Sheets.
+5. Python normalizer also refreshes `public.operator_export_rows` only for dirty `run_date`.
+6. Python sync scripts write operator views back to Google Sheets.
 6. `union` is not a raw wide dump. It is an operator-facing export:
    - `utm_term` is fully collapsed to `aggregated`
    - additive metrics are precomputed for aggregation
@@ -88,6 +89,9 @@ python scripts\normalize_supabase.py --run-date 2026-04-11
 ```
 
 - `run_pipeline.py` is the correct operator entrypoint when the goal is to fully refresh pending dates and then refresh sheets.
+- `union` sync no longer pulls the full `export_rows_wide` into Python.
+  - Python reads pre-aggregated rows from `public.operator_export_rows`
+  - the expensive operator aggregation is cached per `run_date` during normalization
 
 ## Required Configuration
 
@@ -133,6 +137,7 @@ Python:
 - `sync_export_rows_wide_sheet.py`: write operator-facing `union`
 - `sync_pipeline_status_sheet.py`: write run-level operational status to `pipeline_status`
 - `run_pipeline.py`: detect pending raw `run_date`, run normalization, then sync all operator sheets
+- `public.operator_export_rows`: incremental operator cache table for sheet `union`
 
 ## Operator Union Semantics
 

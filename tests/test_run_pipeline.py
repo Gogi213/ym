@@ -9,10 +9,10 @@ class RunPipelineTests(unittest.TestCase):
         self.assertEqual(
             select_pending_run_dates(
                 [
-                    {"run_date": date(2026, 4, 11), "pipeline_status": "ready"},
-                    {"run_date": date(2026, 4, 10), "pipeline_status": "pending_normalize"},
+                    {"run_date": date(2026, 4, 11), "normalize_status": "ready"},
+                    {"run_date": date(2026, 4, 10), "normalize_status": "pending_normalize"},
                     {"run_date": date(2026, 4, 9), "pipeline_status": "raw_only"},
-                    {"run_date": date(2026, 4, 8), "pipeline_status": "pending_normalize"},
+                    {"run_date": date(2026, 4, 8), "normalize_status": "normalize_error"},
                 ]
             ),
             ["2026-04-10", "2026-04-08"],

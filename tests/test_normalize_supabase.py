@@ -6,6 +6,8 @@ from scripts.normalize_supabase import (
     build_fact_payload,
     build_layout_signature,
     build_merge_key,
+    build_pipeline_run_error_update,
+    build_pipeline_run_ready_update,
     build_topic_goal_slot_records,
     canonical_field_for_header,
     extract_report_period_from_text,
@@ -268,6 +270,29 @@ class NormalizeSupabaseTests(unittest.TestCase):
                 "matched_secondary_rows": 1,
                 "unmatched_secondary_rows": 1,
                 "ambiguous_secondary_rows": 0,
+            },
+        )
+
+    def test_build_pipeline_run_ready_update_shapes_explicit_ready_state(self):
+        self.assertEqual(
+            build_pipeline_run_ready_update(
+                files_count=6,
+                fact_rows_count=473,
+            ),
+            {
+                "normalized_files": 6,
+                "normalized_rows": 473,
+                "normalize_status": "ready",
+                "last_error": None,
+            },
+        )
+
+    def test_build_pipeline_run_error_update_shapes_explicit_error_state(self):
+        self.assertEqual(
+            build_pipeline_run_error_update("boom"),
+            {
+                "normalize_status": "normalize_error",
+                "last_error": "boom",
             },
         )
 
