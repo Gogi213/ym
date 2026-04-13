@@ -29,7 +29,11 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
    - package boundaries:
      - `scripts/normalize/fields.py`: header parsing, row parsing, row identity
      - `scripts/normalize/transform.py`: goal-slot collection, secondary merge, fact payload assembly
-     - `scripts/normalize/db.py`: DB fetch/write/refresh paths
+     - `scripts/normalize/db_connection.py`: DB connection/bootstrap
+     - `scripts/normalize/db_reads.py`: raw/state reads
+     - `scripts/normalize/db_writes.py`: fact/state writes
+     - `scripts/normalize/db_operator.py`: current/export refresh paths
+     - `scripts/normalize/db.py`: compatibility facade over DB modules
      - `scripts/normalize/pipeline.py`: normalize/finalize orchestration
 6. Python sync scripts write operator views back to Google Sheets.
 6. `union` is not a raw wide dump. It is an operator-facing export:

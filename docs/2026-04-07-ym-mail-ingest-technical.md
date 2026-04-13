@@ -70,6 +70,10 @@
 - [common.py](/C:/visual%20projects/ym/scripts/normalize/common.py)
 - [fields.py](/C:/visual%20projects/ym/scripts/normalize/fields.py)
 - [transform.py](/C:/visual%20projects/ym/scripts/normalize/transform.py)
+- [db_connection.py](/C:/visual%20projects/ym/scripts/normalize/db_connection.py)
+- [db_reads.py](/C:/visual%20projects/ym/scripts/normalize/db_reads.py)
+- [db_writes.py](/C:/visual%20projects/ym/scripts/normalize/db_writes.py)
+- [db_operator.py](/C:/visual%20projects/ym/scripts/normalize/db_operator.py)
 - [db.py](/C:/visual%20projects/ym/scripts/normalize/db.py)
 - [pipeline.py](/C:/visual%20projects/ym/scripts/normalize/pipeline.py)
 
@@ -86,10 +90,17 @@
   - стабильное назначение `goal_N`;
   - secondary merge;
   - сборка `fact_rows / fact_dimensions / fact_metrics`;
-- `db.py`:
-  - DB fetch/write paths;
-  - `pipeline_runs` updates;
+- `db_connection.py`:
+  - DB connection/bootstrap;
+- `db_reads.py`:
+  - raw/state reads;
+- `db_writes.py`:
+  - fact/state writes;
+- `db_operator.py`:
+  - `is_current` refresh;
   - `operator_export_rows` refresh;
+- `db.py`:
+  - compatibility facade over DB submodules;
 - `pipeline.py`:
   - `normalize_run`;
   - `finalize_normalized_runs`.

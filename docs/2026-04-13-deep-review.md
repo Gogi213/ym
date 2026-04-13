@@ -24,9 +24,10 @@
 - post-processing слой всё ещё batch-heavy;
 - один из главных god objects уже разобран:
   - `normalize_supabase.py` больше не несёт всю business logic внутри одного файла;
+- DB слой normalizer тоже уже разрезан на focused modules;
 - оставшиеся тяжёлые cognitively expensive места сейчас:
   - [Code.js](/C:/visual%20projects/ym/Code.js)
-  - [db.py](/C:/visual%20projects/ym/scripts/normalize/db.py)
+  - [db_operator.py](/C:/visual%20projects/ym/scripts/normalize/db_operator.py)
   - [index.ts](/C:/visual%20projects/ym/supabase/functions/mail-ingest/index.ts)
 
 ---
@@ -134,8 +135,8 @@
 
 Остаточный риск:
 
-- `db.py` всё ещё крупный модуль;
-- SQL-heavy operator refresh и fact write-path пока живут рядом.
+- DB слой больше не живёт в одном файле;
+- но SQL-heavy `db_operator.py` и write-heavy `db_writes.py` всё ещё достаточно плотные по ответственности.
 
 Статус:
 
@@ -246,7 +247,7 @@
 - `pipeline_runs` — правильный state layer;
 - `operator_export_rows` — правильный cache layer;
 - exact secondary merge — правильная defensive логика;
-- normalizer теперь разложен по responsibility boundaries, а не живёт целиком в одном файле.
+- normalizer и DB слой теперь разложены по responsibility boundaries, а не живут целиком в одном файле.
 
 Чего не хватает:
 
