@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from scripts.normalize_supabase import (
     assign_goal_slots,
+    build_affected_row_keys,
     build_fact_payload,
     build_layout_signature,
     build_merge_key,
@@ -200,6 +201,28 @@ class NormalizeSupabaseTests(unittest.TestCase):
         )
 
         self.assertEqual(left["row_hash"], right["row_hash"])
+
+    def test_build_affected_row_keys_unions_existing_and_new_keys(self):
+        affected = build_affected_row_keys(
+            existing_keys=[
+                ("Topic A", "hash-1"),
+                ("Topic A", "hash-2"),
+            ],
+            fact_rows=[
+                {"topic": "Topic A", "row_hash": "hash-2"},
+                {"topic": "Topic B", "row_hash": "hash-3"},
+                {"topic": "Topic B", "row_hash": "hash-3"},
+            ],
+        )
+
+        self.assertEqual(
+            affected,
+            [
+                ("Topic A", "hash-1"),
+                ("Topic A", "hash-2"),
+                ("Topic B", "hash-3"),
+            ],
+        )
 
     def test_build_layout_signature_depends_on_normalized_header_order(self):
         self.assertEqual(

@@ -92,6 +92,8 @@ python scripts\normalize_supabase.py --run-date 2026-04-11
 - `union` sync no longer pulls the full `export_rows_wide` into Python.
   - Python reads pre-aggregated rows from `public.operator_export_rows`
   - the expensive operator aggregation is cached per `run_date` during normalization
+- current-state refresh no longer scans all historical rows for an entire topic.
+  - normalization refreshes `is_current` only for affected `(topic, row_hash)` keys of the dirty `run_date`
 
 ## Validation Snapshot
 

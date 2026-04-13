@@ -263,6 +263,20 @@ Sparse-слой метрик:
 - `operator_export_rows` нужен только для быстрого operator sync;
 - Python больше не тянет десятки тысяч wide-строк в память ради одного листа.
 
+## Current-State Refresh Strategy
+
+После deep review на `2026-04-13` current-state refresh больше не работает на всём historical topic scope.
+
+Теперь normalizer:
+
+- собирает affected key set только для затронутого `run_date`;
+- включает туда:
+  - старые `(topic, row_hash)`, которые удаляются при re-normalize этого дня;
+  - новые `(topic, row_hash)`, которые вставляются этим же прогоном;
+- пересчитывает `is_current` только для этого набора.
+
+Это важно, потому что именно старый refresh-by-topic был главным performance bottleneck incremental pipeline.
+
 ## Validation Status
 
 После фикса `row_hash` / `is_current` и полного rebuild на `2026-04-13` выполнена полная валидация:

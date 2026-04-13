@@ -707,17 +707,45 @@ def build_normalized_payloads(
     return fact_rows, fact_dimensions, fact_metrics, secondary_merge_stats
 
 
-def replace_normalized_rows_for_run(conn, run_date: str) -> None:
+def delete_existing_rows_for_run(conn, run_date: str) -> List[Tuple[str, str]]:
     with conn.cursor() as cur:
         cur.execute(
             """
-            delete from public.fact_rows fr
-            using public.ingest_files f
-            where fr.source_file_id = f.id
-              and f.run_date = %s
+            with deleted as (
+              delete from public.fact_rows fr
+              using public.ingest_files f
+              where fr.source_file_id = f.id
+                and f.run_date = %s
+              returning fr.topic, fr.row_hash
+            )
+            select distinct topic, row_hash
+            from deleted
             """,
             (run_date,),
         )
+        return [
+            (str(row["topic"]), str(row["row_hash"]))
+            for row in cur.fetchall()
+            if row["topic"] and row["row_hash"]
+        ]
+
+
+def build_affected_row_keys(
+    *,
+    existing_keys: Sequence[Tuple[str, str]],
+    fact_rows: Sequence[Dict[str, Any]],
+) -> List[Tuple[str, str]]:
+    affected = {
+        (str(topic), str(row_hash))
+        for topic, row_hash in existing_keys
+        if str(topic or "").strip() and str(row_hash or "").strip()
+    }
+    for row in fact_rows:
+        topic = str(row.get("topic") or "").strip()
+        row_hash = str(row.get("row_hash") or "").strip()
+        if topic and row_hash:
+            affected.add((topic, row_hash))
+    return sorted(affected)
 
 
 def mark_pipeline_run_ready(conn, run_date: str, *, files_count: int, fact_rows_count: int) -> None:
@@ -861,12 +889,34 @@ def insert_fact_metrics(conn, rows: Sequence[Dict[str, Any]]) -> None:
     )
 
 
-def refresh_current_flags_for_topics(conn, topics: Sequence[str]) -> None:
-    topic_list = sorted({str(topic or "").strip() for topic in topics if str(topic or "").strip()})
-    if not topic_list:
+def refresh_current_flags_for_row_keys(conn, row_keys: Sequence[Tuple[str, str]]) -> None:
+    filtered_keys = [
+        (str(topic or "").strip(), str(row_hash or "").strip())
+        for topic, row_hash in row_keys
+        if str(topic or "").strip() and str(row_hash or "").strip()
+    ]
+    if not filtered_keys:
         return
 
     with conn.cursor() as cur:
+        cur.execute(
+            """
+            create temporary table if not exists tmp_affected_row_keys (
+              topic text not null,
+              row_hash text not null,
+              primary key (topic, row_hash)
+            ) on commit drop
+            """
+        )
+        cur.execute("truncate tmp_affected_row_keys")
+        cur.executemany(
+            """
+            insert into tmp_affected_row_keys (topic, row_hash)
+            values (%s, %s)
+            on conflict (topic, row_hash) do nothing
+            """,
+            filtered_keys,
+        )
         cur.execute(
             """
             with ranked as (
@@ -877,14 +927,15 @@ def refresh_current_flags_for_topics(conn, topics: Sequence[str]) -> None:
                   order by fr.message_date desc nulls last, fr.created_at desc, fr.source_file_id desc
                 ) as rn
               from public.fact_rows fr
-              where fr.topic = any(%s)
+              join tmp_affected_row_keys ark
+                on ark.topic = fr.topic
+               and ark.row_hash = fr.row_hash
             )
             update public.fact_rows fr
             set is_current = (ranked.rn = 1)
             from ranked
             where ranked.fact_row_id = fr.fact_row_id
-            """,
-            (topic_list,),
+            """
         )
 
 
@@ -1134,10 +1185,14 @@ def normalize_run(
                 fact_metrics=len(fact_metrics),
                 **secondary_merge_stats,
             )
-
-            phase("normalize_replace_rows_started")
-            replace_normalized_rows_for_run(conn, run_date)
-            phase("normalize_replace_rows_finished")
+            phase("normalize_delete_existing_rows_started")
+            deleted_row_keys = delete_existing_rows_for_run(conn, run_date)
+            phase("normalize_delete_existing_rows_finished", row_keys=len(deleted_row_keys))
+            affected_row_keys = build_affected_row_keys(
+                existing_keys=deleted_row_keys,
+                fact_rows=fact_rows,
+            )
+            phase("normalize_build_affected_row_keys_finished", row_keys=len(affected_row_keys))
             phase("normalize_upsert_goal_slots_started", goal_slot_records=len(topic_goal_slot_records))
             upsert_topic_goal_slots(conn, topic_goal_slot_records)
             phase("normalize_upsert_goal_slots_finished")
@@ -1150,11 +1205,8 @@ def normalize_run(
             phase("normalize_insert_fact_metrics_started", fact_metrics=len(fact_metrics))
             insert_fact_metrics(conn, fact_metrics)
             phase("normalize_insert_fact_metrics_finished")
-            phase("normalize_refresh_flags_started")
-            refresh_current_flags_for_topics(
-                conn,
-                topics=[file_row.get("primary_topic") or file_row["matched_topic"] for file_row in files],
-            )
+            phase("normalize_refresh_flags_started", row_keys=len(affected_row_keys))
+            refresh_current_flags_for_row_keys(conn, affected_row_keys)
             phase("normalize_refresh_flags_finished")
             phase("normalize_refresh_operator_export_started")
             refresh_operator_export_rows_for_run(conn, run_date)
