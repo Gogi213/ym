@@ -64,17 +64,35 @@
 
 ### Python normalizer
 
-Файл: [normalize_supabase.py](/C:/visual%20projects/ym/scripts/normalize_supabase.py)
+Файлы:
+
+- [normalize_supabase.py](/C:/visual%20projects/ym/scripts/normalize_supabase.py)
+- [common.py](/C:/visual%20projects/ym/scripts/normalize/common.py)
+- [fields.py](/C:/visual%20projects/ym/scripts/normalize/fields.py)
+- [transform.py](/C:/visual%20projects/ym/scripts/normalize/transform.py)
+- [db.py](/C:/visual%20projects/ym/scripts/normalize/db.py)
+- [pipeline.py](/C:/visual%20projects/ym/scripts/normalize/pipeline.py)
 
 Ответственность:
 
-- читать raw-слой из Supabase;
-- нормализовать заголовки;
-- раскладывать строку на dimensions, metrics и `goal_N`;
-- стабильно назначать `goal_N` по теме;
-- приклеивать secondary-строки к primary-строкам только по точному grain;
-- строить normalized слой и wide export-view.
-- пересчитывать `public.operator_export_rows` только для затронутого `run_date`.
+- `normalize_supabase.py`:
+  - thin CLI/public facade для тестов и внешних скриптов;
+- `fields.py`:
+  - нормализация заголовков;
+  - parsing metrics/durations;
+  - row identity;
+  - сборка row-level payload;
+- `transform.py`:
+  - стабильное назначение `goal_N`;
+  - secondary merge;
+  - сборка `fact_rows / fact_dimensions / fact_metrics`;
+- `db.py`:
+  - DB fetch/write paths;
+  - `pipeline_runs` updates;
+  - `operator_export_rows` refresh;
+- `pipeline.py`:
+  - `normalize_run`;
+  - `finalize_normalized_runs`.
 
 Правило merge secondary в primary:
 

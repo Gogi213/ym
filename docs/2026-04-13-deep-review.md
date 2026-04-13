@@ -21,10 +21,12 @@
 
 - ingest-контур уже рабочий;
 - модель данных стала заметно взрослее после `pipeline_runs` и `operator_export_rows`;
-- но post-processing слой остаётся тяжёлым и хрупким из-за слишком широких пересчётов current-state;
-- самые тяжёлые и cognitively expensive места проекта сосредоточены в трёх god objects:
+- post-processing слой всё ещё batch-heavy;
+- один из главных god objects уже разобран:
+  - `normalize_supabase.py` больше не несёт всю business logic внутри одного файла;
+- оставшиеся тяжёлые cognitively expensive места сейчас:
   - [Code.js](/C:/visual%20projects/ym/Code.js)
-  - [normalize_supabase.py](/C:/visual%20projects/ym/scripts/normalize_supabase.py)
+  - [db.py](/C:/visual%20projects/ym/scripts/normalize/db.py)
   - [index.ts](/C:/visual%20projects/ym/supabase/functions/mail-ingest/index.ts)
 
 ---
@@ -108,32 +110,37 @@
 
 - исправить в первую очередь.
 
-### 2. Высокий риск: `normalize_supabase.py` — god object
+### 2. Высокий риск: normalizer раньше был god object
 
-Файл:
+Файлы:
 - [normalize_supabase.py](/C:/visual%20projects/ym/scripts/normalize_supabase.py)
+- [fields.py](/C:/visual%20projects/ym/scripts/normalize/fields.py)
+- [transform.py](/C:/visual%20projects/ym/scripts/normalize/transform.py)
+- [db.py](/C:/visual%20projects/ym/scripts/normalize/db.py)
+- [pipeline.py](/C:/visual%20projects/ym/scripts/normalize/pipeline.py)
 
-Симптомы:
+Было:
 
-- `1209` строк;
-- смешаны:
-  - parsing/normalization rules,
-  - row identity,
-  - goal-slot assignment,
-  - secondary merge,
-  - DB write-path,
-  - operator cache refresh,
-  - pipeline status updates.
+- `1200+` строк в одном файле;
+- смешаны parsing, row identity, goal-slot assignment, secondary merge, DB write-path и orchestration.
 
-Последствия:
+Что сделано:
 
-- высокий cognitive load;
-- локальные правки легко создают неожиданные side effects;
-- сложно профилировать и отдельно оптимизировать стадии.
+- `normalize_supabase.py` сжат до thin facade/CLI;
+- parsing/identity вынесены в `fields.py`;
+- payload assembly и merge вынесены в `transform.py`;
+- DB write/refresh paths вынесены в `db.py`;
+- orchestration вынесена в `pipeline.py`.
+
+Остаточный риск:
+
+- `db.py` всё ещё крупный модуль;
+- SQL-heavy operator refresh и fact write-path пока живут рядом.
 
 Статус:
 
-- не критично ломает работу сейчас, но это архитектурный долг.
+- исправлено частично и уже в рабочем коде;
+- это больше не главный god object проекта.
 
 ### 3. Высокий риск: ingest Edge Function тоже стал god object
 
@@ -238,7 +245,8 @@
 
 - `pipeline_runs` — правильный state layer;
 - `operator_export_rows` — правильный cache layer;
-- exact secondary merge — правильная defensive логика.
+- exact secondary merge — правильная defensive логика;
+- normalizer теперь разложен по responsibility boundaries, а не живёт целиком в одном файле.
 
 Чего не хватает:
 

@@ -7,7 +7,8 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 - [Code.js](./Code.js): Apps Script intake from Gmail to Supabase
 - [supabase/functions/mail-ingest/index.ts](./supabase/functions/mail-ingest/index.ts): ingest Edge Function
 - [supabase/migrations](./supabase/migrations): database schema
-- [scripts/normalize_supabase.py](./scripts/normalize_supabase.py): raw -> normalized loader
+- [scripts/normalize_supabase.py](./scripts/normalize_supabase.py): thin CLI/public facade for the normalizer
+- [scripts/normalize](./scripts/normalize): modular normalizer package
 - [scripts/sync_goal_mapping_sheet.py](./scripts/sync_goal_mapping_sheet.py): goal slot mapping sync to sheet `отчеты`
 - [scripts/sync_export_rows_wide_sheet.py](./scripts/sync_export_rows_wide_sheet.py): operator union sync to sheet `union`
 - [scripts/sync_pipeline_status_sheet.py](./scripts/sync_pipeline_status_sheet.py): pipeline status sync to sheet `pipeline_status`
@@ -25,6 +26,11 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
    - secondary topics do not become standalone operator topics
    - they are attached to their `primary_topic` only when the exact grain matches
 5. Python normalizer also refreshes `public.operator_export_rows` only for dirty `run_date`.
+   - package boundaries:
+     - `scripts/normalize/fields.py`: header parsing, row parsing, row identity
+     - `scripts/normalize/transform.py`: goal-slot collection, secondary merge, fact payload assembly
+     - `scripts/normalize/db.py`: DB fetch/write/refresh paths
+     - `scripts/normalize/pipeline.py`: normalize/finalize orchestration
 6. Python sync scripts write operator views back to Google Sheets.
 6. `union` is not a raw wide dump. It is an operator-facing export:
    - `utm_term` is fully collapsed to `aggregated`
@@ -111,6 +117,9 @@ python scripts\normalize_supabase.py --run-date 2026-04-11
   - normalization refreshes `is_current` only for affected `(topic, row_hash)` keys of the dirty `run_date`
 - latest cold-start measurement after bootstrap fast path:
   - `2026-04-01 .. 2026-04-12` rebuild from empty normalized layer completed in about `606882ms`
+- normalizer entrypoint is no longer a 1000+ line god object:
+  - `scripts/normalize_supabase.py` is now a thin facade
+  - heavy logic lives in the `scripts/normalize/` package by responsibility
 
 ## Validation Snapshot
 

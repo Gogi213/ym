@@ -14,7 +14,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.normalize_supabase import connect_db
+from scripts.normalize.db import connect_db
 
 
 SCOPES = [

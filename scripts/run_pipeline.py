@@ -10,7 +10,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.normalize_supabase import finalize_normalized_runs, normalize_run, public_payload
+from scripts.normalize.common import public_payload
+from scripts.normalize.pipeline import finalize_normalized_runs, normalize_run
 from scripts.sync_export_rows_wide_sheet import sync_export_rows_wide_sheet
 from scripts.sync_goal_mapping_sheet import sync_goal_mapping_sheet
 from scripts.sync_pipeline_status_sheet import fetch_pipeline_status_records, sync_pipeline_status_sheet
