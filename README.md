@@ -97,11 +97,12 @@ python scripts\normalize_supabase.py --run-date 2026-04-11
 
 ## Validation Snapshot
 
-Сквозная сверка `raw -> export_rows_wide -> union` выполнена на `2026-04-13` после полного rebuild normalized-слоя.
+Сквозная сверка `raw -> export_rows_wide -> union` выполнена на `2026-04-13` после свежего month-backfill и полного rebuild normalized-слоя.
 
 Проверка включала:
 
 - все темы, которые дошли до `public.ingest_files` со статусом `ingested`;
+- все дни `2026-04-01 .. 2026-04-12`;
 - суммы `visits` по дням;
 - суммы `goal_1 ... goal_N` по дням для всех тем, у которых есть goal-слоты;
 - сравнение между:
@@ -109,8 +110,18 @@ python scripts\normalize_supabase.py --run-date 2026-04-11
   - `public.export_rows_wide`;
   - листом `union` в Google Sheets.
 
+Семантика проверки:
+
+- `visits` проверяются по `primary` raw-файлам;
+- `goal_*` проверяются по effective topic:
+  - `primary` goal-значения;
+  - плюс `secondary`, приклеенный к `primary_topic`.
+
 Итог проверки:
 
+- `topics_total = 23`
+- `visit_days_total = 223`
+- `goal_points_total = 1784`
 - `visit_mismatches = 0`
 - `goal_mismatches = 0`
 

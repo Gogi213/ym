@@ -292,6 +292,14 @@ Sparse-слой метрик:
 - `visit_mismatches = 0`
 - `goal_mismatches = 0`
 
+Важно по семантике:
+
+- `visits` в export не суммируют secondary-строки поверх primary;
+- `goal_*` в export могут приходить из `secondary`, если exact-grain merge совпал;
+- поэтому корректная validation model такая:
+  - `visits`: raw `primary` -> `export_rows_wide` -> `union`
+  - `goal_*`: raw effective topic (`primary + attached secondary`) -> `export_rows_wide` -> `union`
+
 ## Operator Union Export
 
 Лист: `union`

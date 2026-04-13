@@ -269,6 +269,13 @@
   - `normalize_finished ~60s`
   - `refresh_flags ~6s`
 
+Новый главный hotspot после этого фикса:
+
+- `insert_fact_rows + insert_fact_dimensions + insert_fact_metrics`
+- `refresh_operator_export_rows_for_run`
+
+То есть следующий выигрыш уже лежит не в current-state logic, а в сокращении объёма day rewrite и более дешёвом operator cache refresh.
+
 ### Priority 2
 
 - декомпозировать `normalize_supabase.py` по ответственности хотя бы на:
