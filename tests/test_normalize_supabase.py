@@ -5,10 +5,12 @@ from scripts.normalize_supabase import (
     assign_goal_slots,
     build_fact_payload,
     build_layout_signature,
+    build_merge_key,
     build_topic_goal_slot_records,
     canonical_field_for_header,
     extract_report_period_from_text,
     extract_report_date,
+    merge_secondary_payloads_into_primary,
     normalize_header,
     parse_duration_to_seconds,
     parse_metric_value,
@@ -172,6 +174,101 @@ class NormalizeSupabaseTests(unittest.TestCase):
                     "first_seen_file_id": "file-1",
                 },
             ],
+        )
+
+    def test_merge_secondary_payloads_into_primary_attaches_only_on_exact_grain(self):
+        primary_entry = {
+            "payload": {
+                "topic": "Primary Topic",
+                "report_date": "2026-04-10",
+                "report_date_from": "2026-04-10",
+                "report_date_to": "2026-04-10",
+                "dimensions": {
+                    "utm_source": "solta",
+                    "utm_medium": "cpm",
+                    "utm_campaign": "cmp",
+                    "utm_content": "banner",
+                    "utm_term": "term-1",
+                },
+                "metrics": {
+                    "visits": Decimal("10"),
+                },
+                "goals": {
+                    "goal_1": Decimal("2"),
+                },
+            }
+        }
+        matching_secondary = {
+            "payload": {
+                "topic": "Primary Topic",
+                "report_date": "2026-04-10",
+                "report_date_from": "2026-04-10",
+                "report_date_to": "2026-04-10",
+                "dimensions": {
+                    "utm_source": "solta",
+                    "utm_medium": "cpm",
+                    "utm_campaign": "cmp",
+                    "utm_content": "banner",
+                    "utm_term": "term-1",
+                },
+                "metrics": {
+                    "visits": Decimal("999"),
+                },
+                "goals": {
+                    "goal_2": Decimal("5"),
+                },
+            }
+        }
+        unmatched_secondary = {
+            "payload": {
+                "topic": "Primary Topic",
+                "report_date": "2026-04-10",
+                "report_date_from": "2026-04-10",
+                "report_date_to": "2026-04-10",
+                "dimensions": {
+                    "utm_source": "solta",
+                    "utm_medium": "cpm",
+                    "utm_campaign": "cmp",
+                    "utm_content": "banner-2",
+                    "utm_term": "term-1",
+                },
+                "metrics": {},
+                "goals": {
+                    "goal_3": Decimal("7"),
+                },
+            }
+        }
+
+        stats = merge_secondary_payloads_into_primary(
+            [primary_entry],
+            [matching_secondary, unmatched_secondary],
+        )
+
+        self.assertEqual(
+            build_merge_key(primary_entry["payload"]),
+            (
+                "Primary Topic",
+                "2026-04-10",
+                "2026-04-10",
+                "2026-04-10",
+                "solta",
+                "cpm",
+                "cmp",
+                "banner",
+                "term-1",
+            ),
+        )
+        self.assertEqual(primary_entry["payload"]["metrics"]["visits"], Decimal("10"))
+        self.assertEqual(primary_entry["payload"]["goals"]["goal_1"], Decimal("2"))
+        self.assertEqual(primary_entry["payload"]["goals"]["goal_2"], Decimal("5"))
+        self.assertNotIn("goal_3", primary_entry["payload"]["goals"])
+        self.assertEqual(
+            stats,
+            {
+                "matched_secondary_rows": 1,
+                "unmatched_secondary_rows": 1,
+                "ambiguous_secondary_rows": 0,
+            },
         )
 
 

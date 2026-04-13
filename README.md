@@ -16,10 +16,14 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 
 ## Runtime Shape
 
-1. Apps Script reads topics from spreadsheet `17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA`, sheet `отчеты`, column `A` starting from `A2`.
+1. Apps Script reads topic bindings from spreadsheet `17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA`, sheet `отчеты`:
+   - column `A` = primary topic
+   - column `B` = optional secondary topic with conversions
 2. Apps Script finds matching Gmail messages and uploads `xlsx/csv` attachments to the Supabase Edge Function.
 3. Supabase stores raw files and extracted raw rows.
 4. Python normalizer builds canonical fact tables and `export_rows_wide`.
+   - secondary topics do not become standalone operator topics
+   - they are attached to their `primary_topic` only when the exact grain matches
 5. Python sync scripts write operator views back to Google Sheets.
 6. `union` is not a raw wide dump. It is an operator-facing export:
    - `utm_term` is fully collapsed to `aggregated`
@@ -102,6 +106,15 @@ Apps Script:
 Python:
 
 - `normalize_supabase.py`: rebuild normalized layer for a specific `run_date`
+- secondary topic rows are merged into primary topic rows only on exact grain:
+  - `report_date`
+  - `report_date_from`
+  - `report_date_to`
+  - `utm_source`
+  - `utm_medium`
+  - `utm_campaign`
+  - `utm_content`
+  - `utm_term`
 - `sync_goal_mapping_sheet.py`: write goal slot labels to sheet `отчеты`
 - `sync_export_rows_wide_sheet.py`: write operator-facing `union`
 - `sync_pipeline_status_sheet.py`: write run-level operational status to `pipeline_status`

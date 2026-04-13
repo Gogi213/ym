@@ -11,7 +11,9 @@ const UTM_HEADERS: Record<string, true> = {
 type IngestMeta = {
   action: 'ingest'
   run_date: string
+  primary_topic: string
   matched_topic: string
+  topic_role: 'primary' | 'secondary'
   message_subject: string
   message_date: string
   message_id: string
@@ -540,7 +542,9 @@ async function insertFileRecord(
     thread_id: meta.thread_id,
     message_date: meta.message_date,
     message_subject: meta.message_subject,
+    primary_topic: meta.primary_topic,
     matched_topic: meta.matched_topic,
+    topic_role: meta.topic_role,
     attachment_name: meta.attachment_name,
     attachment_type: attachmentType,
     status,
@@ -632,7 +636,12 @@ async function handleIngest(req: Request) {
     return jsonResponse({ ok: false, error: 'Invalid meta JSON' }, 400)
   }
 
-  if (meta.action !== 'ingest' || !isValidRunDate(meta.run_date)) {
+  if (
+    meta.action !== 'ingest' ||
+    !isValidRunDate(meta.run_date) ||
+    !String(meta.primary_topic || '').trim() ||
+    !['primary', 'secondary'].includes(String(meta.topic_role || ''))
+  ) {
     return jsonResponse({ ok: false, error: 'Invalid ingest payload' }, 400)
   }
 

@@ -17,23 +17,42 @@ test('normalizeText_ lowercases, removes punctuation, and normalizes yo', () => 
 
 test('loadTopicRulesFromValues_ tokenizes non-empty topic rows', () => {
   const rules = ingest.loadTopicRulesFromValues_([
-    [' Weekly Report '],
+    [' Weekly Report ', 'Weekly Report Conversions'],
     [''],
     ['utm source']
   ]);
 
   assert.deepEqual(rules, [
-    { raw: 'Weekly Report', tokens: ['weekly', 'report'] },
-    { raw: 'utm source', tokens: ['utm', 'source'] }
+    {
+      raw: 'Weekly Report',
+      matchedTopic: 'Weekly Report',
+      primaryTopic: 'Weekly Report',
+      topicRole: 'primary',
+      tokens: ['weekly', 'report']
+    },
+    {
+      raw: 'Weekly Report Conversions',
+      matchedTopic: 'Weekly Report Conversions',
+      primaryTopic: 'Weekly Report',
+      topicRole: 'secondary',
+      tokens: ['weekly', 'report', 'conversions']
+    },
+    {
+      raw: 'utm source',
+      matchedTopic: 'utm source',
+      primaryTopic: 'utm source',
+      topicRole: 'primary',
+      tokens: ['utm', 'source']
+    }
   ]);
 });
 
 test('loadTopicRulesFromSpreadsheet_ reads topics starting from row 2 and ignores A1 header', () => {
   const values = [
-    ['Тема письма'],
-    ['Abbott / Heptral / 2026 / Solta'],
+    ['Тема письма', 'Конверсии'],
+    ['Abbott / Heptral / 2026 / Solta', 'Abbott / Heptral / 2026 / Solta / конверсии'],
     [''],
-    ['TW // Назонекс Аллерджи // Solta']
+    ['TW // Назонекс Аллерджи // Solta', '']
   ];
 
   const sheet = {
@@ -44,7 +63,7 @@ test('loadTopicRulesFromSpreadsheet_ reads topics starting from row 2 and ignore
       assert.equal(row, 2);
       assert.equal(column, 1);
       assert.equal(numRows, 3);
-      assert.equal(numCols, 1);
+      assert.equal(numCols, 2);
       return {
         getDisplayValues() {
           return values.slice(1);
@@ -63,8 +82,27 @@ test('loadTopicRulesFromSpreadsheet_ reads topics starting from row 2 and ignore
   assert.deepEqual(
     ingest.loadTopicRulesFromSpreadsheet_(spreadsheet),
     [
-      { raw: 'Abbott / Heptral / 2026 / Solta', tokens: ['abbott', 'heptral', '2026', 'solta'] },
-      { raw: 'TW // Назонекс Аллерджи // Solta', tokens: ['tw', 'назонекс', 'аллерджи', 'solta'] }
+      {
+        raw: 'Abbott / Heptral / 2026 / Solta',
+        matchedTopic: 'Abbott / Heptral / 2026 / Solta',
+        primaryTopic: 'Abbott / Heptral / 2026 / Solta',
+        topicRole: 'primary',
+        tokens: ['abbott', 'heptral', '2026', 'solta']
+      },
+      {
+        raw: 'Abbott / Heptral / 2026 / Solta / конверсии',
+        matchedTopic: 'Abbott / Heptral / 2026 / Solta / конверсии',
+        primaryTopic: 'Abbott / Heptral / 2026 / Solta',
+        topicRole: 'secondary',
+        tokens: ['abbott', 'heptral', '2026', 'solta', 'конверсии']
+      },
+      {
+        raw: 'TW // Назонекс Аллерджи // Solta',
+        matchedTopic: 'TW // Назонекс Аллерджи // Solta',
+        primaryTopic: 'TW // Назонекс Аллерджи // Solta',
+        topicRole: 'primary',
+        tokens: ['tw', 'назонекс', 'аллерджи', 'solta']
+      }
     ]
   );
 });
@@ -174,6 +212,8 @@ test('collectCandidateMessages_ prefers subject report date over message date', 
 
   assert.equal(result.length, 1);
   assert.equal(result[0].matchedTopic, '_SenSoy_');
+  assert.equal(result[0].primaryTopic, '_SenSoy_');
+  assert.equal(result[0].topicRole, 'primary');
 });
 
 test('buildCandidatesByRunDate_ groups matched messages by effective run date', () => {
@@ -222,8 +262,10 @@ test('buildCandidatesByRunDate_ groups matched messages by effective run date', 
   assert.deepEqual(Object.keys(grouped).sort(), ['2026-04-10', '2026-04-11']);
   assert.equal(grouped['2026-04-11'].length, 1);
   assert.equal(grouped['2026-04-11'][0].matchedTopic, '_SenSoy_');
+  assert.equal(grouped['2026-04-11'][0].primaryTopic, '_SenSoy_');
   assert.equal(grouped['2026-04-10'].length, 1);
   assert.equal(grouped['2026-04-10'][0].matchedTopic, 'TW // Назонекс Аллерджи // Solta');
+  assert.equal(grouped['2026-04-10'][0].primaryTopic, 'TW // Назонекс Аллерджи // Solta');
 });
 
 test('formatRunDate_ formats date in target timezone', () => {
@@ -336,7 +378,9 @@ test('buildAttachmentMetadata_ shapes multipart metadata for one attachment uplo
   assert.deepEqual(
     ingest.buildAttachmentMetadata_({
       runDate: '2026-04-06',
+      primaryTopic: 'weekly report',
       matchedTopic: 'weekly report',
+      topicRole: 'primary',
       subject: 'Weekly report for Solta',
       messageDate: new Date('2026-04-06T09:30:00Z'),
       messageId: 'msg-1',
@@ -347,7 +391,9 @@ test('buildAttachmentMetadata_ shapes multipart metadata for one attachment uplo
     {
       action: 'ingest',
       run_date: '2026-04-06',
+      primary_topic: 'weekly report',
       matched_topic: 'weekly report',
+      topic_role: 'primary',
       message_subject: 'Weekly report for Solta',
       message_date: '2026-04-06T09:30:00.000Z',
       message_id: 'msg-1',
@@ -429,9 +475,9 @@ test('buildSupabaseSelectRequest_ shapes REST request for Supabase REST read', (
 
 test('buildRunContext_ loads timezone, topics, and ingest settings once', () => {
   const values = [
-    ['Тема письма'],
-    ['TW // Назонекс Аллерджи // Solta'],
-    ['_SenSoy_']
+    ['Тема письма', 'Конверсии'],
+    ['TW // Назонекс Аллерджи // Solta', 'TW // Назонекс Аллерджи // Solta // conversions'],
+    ['_SenSoy_', '']
   ];
   const scriptProperties = {
     getProperty(name) {
@@ -464,7 +510,7 @@ test('buildRunContext_ loads timezone, topics, and ingest settings once', () => 
                 assert.equal(row, 2);
                 assert.equal(column, 1);
                 assert.equal(numRows, 2);
-                assert.equal(numCols, 1);
+                assert.equal(numCols, 2);
                 return {
                   getDisplayValues() {
                     return values.slice(1);
@@ -486,8 +532,27 @@ test('buildRunContext_ loads timezone, topics, and ingest settings once', () => 
   assert.deepEqual(ingest.buildRunContext_(runtime), {
     timeZone: 'Asia/Tbilisi',
     topicRules: [
-      { raw: 'TW // Назонекс Аллерджи // Solta', tokens: ['tw', 'назонекс', 'аллерджи', 'solta'] },
-      { raw: '_SenSoy_', tokens: ['sensoy'] }
+      {
+        raw: 'TW // Назонекс Аллерджи // Solta',
+        matchedTopic: 'TW // Назонекс Аллерджи // Solta',
+        primaryTopic: 'TW // Назонекс Аллерджи // Solta',
+        topicRole: 'primary',
+        tokens: ['tw', 'назонекс', 'аллерджи', 'solta']
+      },
+      {
+        raw: 'TW // Назонекс Аллерджи // Solta // conversions',
+        matchedTopic: 'TW // Назонекс Аллерджи // Solta // conversions',
+        primaryTopic: 'TW // Назонекс Аллерджи // Solta',
+        topicRole: 'secondary',
+        tokens: ['tw', 'назонекс', 'аллерджи', 'solta', 'conversions']
+      },
+      {
+        raw: '_SenSoy_',
+        matchedTopic: '_SenSoy_',
+        primaryTopic: '_SenSoy_',
+        topicRole: 'primary',
+        tokens: ['sensoy']
+      }
     ],
     settings: {
       functionUrl: 'https://example.supabase.co/functions/v1/mail-ingest',

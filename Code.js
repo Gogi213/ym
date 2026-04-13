@@ -2,6 +2,7 @@ const CONFIG_ = {
   sourceSpreadsheetId: '17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA',
   sourceSheetName: 'отчеты',
   sourceColumn: 1,
+  sourceSecondaryColumn: 2,
   supabaseFunctionUrlProperty: 'SUPABASE_FUNCTION_URL',
   supabaseIngestTokenProperty: 'SUPABASE_INGEST_TOKEN',
   supabaseRestUrlProperty: 'SUPABASE_REST_URL',
@@ -34,19 +35,39 @@ function compactText_(text) {
 
 function loadTopicRulesFromValues_(values) {
   const rules = [];
+  const seenMatchedTopics = {};
 
   for (let i = 0; i < values.length; i++) {
-    const raw = String(values[i] && values[i][0] ? values[i][0] : '').trim();
-    if (!raw) {
-      continue;
+    const primaryRaw = String(values[i] && values[i][0] ? values[i][0] : '').trim();
+    const secondaryRaw = String(values[i] && values[i][1] ? values[i][1] : '').trim();
+
+    if (primaryRaw) {
+      const primaryTokens = tokenizeTopic_(primaryRaw);
+      if (primaryTokens.length && !seenMatchedTopics[primaryRaw]) {
+        rules.push({
+          raw: primaryRaw,
+          matchedTopic: primaryRaw,
+          primaryTopic: primaryRaw,
+          topicRole: 'primary',
+          tokens: primaryTokens
+        });
+        seenMatchedTopics[primaryRaw] = true;
+      }
     }
 
-    const tokens = tokenizeTopic_(raw);
-    if (!tokens.length) {
-      continue;
+    if (secondaryRaw) {
+      const secondaryTokens = tokenizeTopic_(secondaryRaw);
+      if (secondaryTokens.length && !seenMatchedTopics[secondaryRaw]) {
+        rules.push({
+          raw: secondaryRaw,
+          matchedTopic: secondaryRaw,
+          primaryTopic: primaryRaw || secondaryRaw,
+          topicRole: 'secondary',
+          tokens: secondaryTokens
+        });
+        seenMatchedTopics[secondaryRaw] = true;
+      }
     }
-
-    rules.push({ raw, tokens });
   }
 
   return rules;
@@ -68,7 +89,7 @@ function extractSubjectReportDate_(subject) {
   return match[3] + '-' + match[2] + '-' + match[1];
 }
 
-function findMatchedTopic_(subject, topicRules) {
+function findMatchedTopicRule_(subject, topicRules) {
   const normalizedMatchTarget = normalizeText_(extractSubjectBody_(subject) || subject);
   const compactMatchTarget = compactText_(extractSubjectBody_(subject) || subject);
 
@@ -80,20 +101,25 @@ function findMatchedTopic_(subject, topicRules) {
     }
 
     if (normalizedMatchTarget.indexOf(normalizedTopic) !== -1) {
-      return topicRule.raw;
+      return topicRule;
     }
 
     const compactTopic = compactText_(topicRule.raw);
     if (compactTopic && compactMatchTarget.indexOf(compactTopic) !== -1) {
-      return topicRule.raw;
+      return topicRule;
     }
   }
 
   return null;
 }
 
+function findMatchedTopic_(subject, topicRules) {
+  const topicRule = findMatchedTopicRule_(subject, topicRules);
+  return topicRule ? topicRule.raw : null;
+}
+
 function subjectMatchesTopics_(subject, topicRules) {
-  return findMatchedTopic_(subject, topicRules) !== null;
+  return findMatchedTopicRule_(subject, topicRules) !== null;
 }
 
 function padNumber_(value) {
@@ -198,7 +224,7 @@ function loadTopicRulesFromSpreadsheet_(spreadsheet) {
   }
 
   return loadTopicRulesFromValues_(
-    sheet.getRange(2, CONFIG_.sourceColumn, lastRow - 1, 1).getDisplayValues()
+    sheet.getRange(2, CONFIG_.sourceColumn, lastRow - 1, CONFIG_.sourceSecondaryColumn).getDisplayValues()
   );
 }
 
@@ -236,14 +262,16 @@ function collectCandidateMessages_(threads, topicRules, runDate, timeZone) {
         continue;
       }
 
-      const matchedTopic = findMatchedTopic_(subject, topicRules);
-      if (!matchedTopic) {
+      const matchedTopicRule = findMatchedTopicRule_(subject, topicRules);
+      if (!matchedTopicRule) {
         continue;
       }
 
       candidates.push({
         effectiveRunDate,
-        matchedTopic,
+        matchedTopic: matchedTopicRule.matchedTopic || matchedTopicRule.raw,
+        primaryTopic: matchedTopicRule.primaryTopic || matchedTopicRule.raw,
+        topicRole: matchedTopicRule.topicRole || 'primary',
         message,
         messageDate: message.getDate(),
         messageId: message.getId(),
@@ -269,9 +297,9 @@ function buildCandidatesByRunDate_(threads, topicRules, timeZone) {
       const subject = String(message.getSubject() || '').trim();
       const subjectReportDate = extractSubjectReportDate_(subject);
       const effectiveRunDate = subjectReportDate || formatRunDate_(message.getDate(), timeZone);
-      const matchedTopic = findMatchedTopic_(subject, topicRules);
+      const matchedTopicRule = findMatchedTopicRule_(subject, topicRules);
 
-      if (!matchedTopic) {
+      if (!matchedTopicRule) {
         continue;
       }
 
@@ -281,7 +309,9 @@ function buildCandidatesByRunDate_(threads, topicRules, timeZone) {
 
       grouped[effectiveRunDate].push({
         effectiveRunDate,
-        matchedTopic,
+        matchedTopic: matchedTopicRule.matchedTopic || matchedTopicRule.raw,
+        primaryTopic: matchedTopicRule.primaryTopic || matchedTopicRule.raw,
+        topicRole: matchedTopicRule.topicRole || 'primary',
         message,
         messageDate: message.getDate(),
         messageId: message.getId(),
@@ -333,7 +363,9 @@ function buildAttachmentMetadata_(input) {
   return {
     action: 'ingest',
     run_date: input.runDate,
+    primary_topic: input.primaryTopic,
     matched_topic: input.matchedTopic,
+    topic_role: input.topicRole,
     message_subject: input.subject,
     message_date: input.messageDate instanceof Date
       ? input.messageDate.toISOString()
@@ -670,7 +702,9 @@ function runForDate_(runtime, runDate, startedAtMs, runContext, options) {
           attachment,
           buildAttachmentMetadata_({
             runDate,
+            primaryTopic: candidate.primaryTopic,
             matchedTopic: candidate.matchedTopic,
+            topicRole: candidate.topicRole,
             subject: candidate.subject,
             messageDate: candidate.messageDate,
             messageId: candidate.messageId,

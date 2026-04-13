@@ -16,7 +16,7 @@
 
 Что уже реализовано:
 
-- чтение тем из proxy spreadsheet;
+- чтение связок `primary -> secondary` из proxy spreadsheet;
 - поиск писем в Gmail по неполному вхождению темы;
 - отправка `xlsx/csv` вложений в Supabase;
 - сохранение raw-слоя файлов и строк;
@@ -31,7 +31,9 @@
 
 Ответственность:
 
-- читать темы из spreadsheet `17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA`;
+- читать связки тем из spreadsheet `17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA`:
+  - `A` = primary topic
+  - `B` = optional secondary topic с конверсиями;
 - искать письма в ящике `ya-stats@solta.io`;
 - матчить письма по теме внутри тела заголовка;
 - брать `xlsx/csv` вложения;
@@ -42,6 +44,10 @@
 
 - текущий код работает с `runDayOffset = -1`, то есть по умолчанию грузит вчерашнюю дату по часовому поясу скрипта;
 - dedup и классификация файла происходят уже после Apps Script.
+- Apps Script отправляет в ingest метаданные:
+  - `matched_topic`
+  - `primary_topic`
+  - `topic_role = primary | secondary`
 
 ### Supabase Edge Function
 
@@ -65,7 +71,23 @@
 - нормализовать заголовки;
 - раскладывать строку на dimensions, metrics и `goal_N`;
 - стабильно назначать `goal_N` по теме;
+- приклеивать secondary-строки к primary-строкам только по точному grain;
 - строить normalized слой и wide export-view.
+
+Правило merge secondary в primary:
+
+- `secondary` topic не уходит отдельной операторской темой;
+- бизнес-topic для него всегда `primary_topic`;
+- merge допускается только при полном совпадении:
+  - `report_date`
+  - `report_date_from`
+  - `report_date_to`
+  - `utm_source`
+  - `utm_medium`
+  - `utm_campaign`
+  - `utm_content`
+  - `utm_term`
+- если exact grain не совпал, строка secondary не приклеивается автоматически.
 
 ### Python sheet sync
 
@@ -95,6 +117,8 @@
 Назначение:
 
 - `ingest_files` хранит метаданные файла, статус ingest и `header_json`;
+- `ingest_files.primary_topic` хранит основной бизнес-topic, к которому относится secondary-файл;
+- `ingest_files.topic_role` различает primary и secondary ingest;
 - `ingest_rows` хранит распарсенные строки только для валидных таблиц;
 - `ingest_file_payloads` хранит сырой файл в base64, чтобы файл не терялся даже если parsing failed.
 

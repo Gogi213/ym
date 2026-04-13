@@ -33,6 +33,14 @@ HEADER_ALIASES: Dict[str, Tuple[str, str]] = {
 }
 
 MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+BASE_METRIC_KEYS = {
+    "visits",
+    "users",
+    "bounce_rate",
+    "page_depth",
+    "time_on_site_seconds",
+    "robot_rate",
+}
 
 
 def emit_log(
@@ -360,14 +368,18 @@ def fetch_ingested_files(conn, run_date: str) -> List[Dict[str, Any]]:
               thread_id,
               message_date,
               message_subject,
+              primary_topic,
               matched_topic,
+              topic_role,
               attachment_name,
               attachment_type,
               header_json
             from public.ingest_files
             where run_date = %s
               and status = 'ingested'
-            order by matched_topic, message_date, created_at, id
+            order by coalesce(primary_topic, matched_topic),
+                     case when coalesce(topic_role, 'primary') = 'primary' then 0 else 1 end,
+                     message_date, created_at, id
             """,
             (run_date,),
         )
@@ -440,7 +452,7 @@ def collect_goal_slots(
     first_seen_file_ids: Dict[str, Dict[str, str]] = defaultdict(dict)
 
     for file_row in files:
-        topic = file_row["matched_topic"]
+        topic = file_row.get("primary_topic") or file_row["matched_topic"]
         headers = file_row.get("header_json") or []
         goal_headers = [
             header
@@ -463,23 +475,90 @@ def collect_goal_slots(
     return goal_slots_by_topic, dict(first_seen_file_ids)
 
 
+def build_merge_key(payload: Dict[str, Any]) -> Tuple[Any, ...]:
+    dimensions = payload["dimensions"]
+    return (
+        payload["topic"],
+        payload["report_date"],
+        payload["report_date_from"],
+        payload["report_date_to"],
+        dimensions.get("utm_source", ""),
+        dimensions.get("utm_medium", ""),
+        dimensions.get("utm_campaign", ""),
+        dimensions.get("utm_content", ""),
+        dimensions.get("utm_term", ""),
+    )
+
+
+def merge_secondary_payloads_into_primary(
+    primary_entries: List[Dict[str, Any]],
+    secondary_entries: List[Dict[str, Any]],
+) -> Dict[str, int]:
+    primary_index: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = defaultdict(list)
+    for entry in primary_entries:
+        primary_index[build_merge_key(entry["payload"])].append(entry)
+
+    matched_secondary_rows = 0
+    unmatched_secondary_rows = 0
+    ambiguous_secondary_rows = 0
+
+    for entry in secondary_entries:
+        payload = entry["payload"]
+        merge_candidates = primary_index.get(build_merge_key(payload), [])
+        if not merge_candidates:
+            unmatched_secondary_rows += 1
+            continue
+        if len(merge_candidates) != 1:
+            ambiguous_secondary_rows += 1
+            continue
+
+        target_payload = merge_candidates[0]["payload"]
+        for goal_key, goal_value in sorted(payload["goals"].items()):
+            current_value = target_payload["goals"].get(goal_key)
+            if current_value is None:
+                target_payload["goals"][goal_key] = goal_value
+            else:
+                target_payload["goals"][goal_key] = current_value + goal_value
+
+        for metric_key, metric_value in sorted(payload["metrics"].items()):
+            if metric_key in BASE_METRIC_KEYS:
+                continue
+            current_value = target_payload["metrics"].get(metric_key)
+            if current_value is None:
+                target_payload["metrics"][metric_key] = metric_value
+            else:
+                target_payload["metrics"][metric_key] = current_value + metric_value
+
+        matched_secondary_rows += 1
+
+    return {
+        "matched_secondary_rows": matched_secondary_rows,
+        "unmatched_secondary_rows": unmatched_secondary_rows,
+        "ambiguous_secondary_rows": ambiguous_secondary_rows,
+    }
+
+
 def build_normalized_payloads(
     files: Sequence[Dict[str, Any]],
     rows_by_file_id: Dict[str, List[Dict[str, Any]]],
     payloads_by_file_id: Dict[str, Dict[str, Any]],
     goal_slots_by_topic: Dict[str, Dict[str, int]],
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, int]]:
+    primary_entries: List[Dict[str, Any]] = []
+    secondary_entries: List[Dict[str, Any]] = []
     fact_rows: List[Dict[str, Any]] = []
     fact_dimensions: List[Dict[str, Any]] = []
     fact_metrics: List[Dict[str, Any]] = []
 
     for file_row in files:
         file_id = str(file_row["id"])
-        topic = file_row["matched_topic"]
+        matched_topic = file_row["matched_topic"]
+        primary_topic = file_row.get("primary_topic") or matched_topic
+        topic_role = str(file_row.get("topic_role") or "primary")
         headers = file_row.get("header_json") or []
         layout_signature = build_layout_signature(headers)
         message_date = file_row["message_date"].isoformat() if file_row.get("message_date") else ""
-        goal_slots = goal_slots_by_topic.get(topic, {})
+        goal_slots = goal_slots_by_topic.get(primary_topic, {})
         payload_row = payloads_by_file_id.get(file_id, {})
         file_report_period = extract_report_period_from_payload(
             attachment_type=file_row.get("attachment_type") or "",
@@ -488,7 +567,7 @@ def build_normalized_payloads(
 
         for raw_row in rows_by_file_id.get(file_id, []):
             payload = build_fact_payload(
-                topic=topic,
+                topic=primary_topic,
                 file_id=file_id,
                 row_index=raw_row["row_index"],
                 row=raw_row["row_json"],
@@ -500,45 +579,68 @@ def build_normalized_payloads(
             if not payload["dimensions"] and not payload["metrics"] and not payload["goals"]:
                 continue
 
-            fact_row_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{file_id}:{raw_row['row_index']}"))
+            entry = {
+                "file_row": file_row,
+                "raw_row": raw_row,
+                "layout_signature": layout_signature,
+                "payload": payload,
+                "matched_topic": matched_topic,
+                "primary_topic": primary_topic,
+                "topic_role": topic_role,
+            }
 
-            fact_rows.append(
+            if topic_role == "secondary":
+                secondary_entries.append(entry)
+            else:
+                primary_entries.append(entry)
+
+    secondary_merge_stats = merge_secondary_payloads_into_primary(primary_entries, secondary_entries)
+
+    for entry in primary_entries:
+        file_row = entry["file_row"]
+        raw_row = entry["raw_row"]
+        payload = entry["payload"]
+        layout_signature = entry["layout_signature"]
+        file_id = str(file_row["id"])
+        fact_row_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{file_id}:{raw_row['row_index']}"))
+
+        fact_rows.append(
+            {
+                "fact_row_id": fact_row_id,
+                "topic": payload["topic"],
+                "source_file_id": file_id,
+                "source_row_index": raw_row["row_index"],
+                "report_date": payload["report_date"],
+                "report_date_from": payload["report_date_from"],
+                "report_date_to": payload["report_date_to"],
+                "message_date": file_row["message_date"],
+                "layout_signature": layout_signature,
+                "row_hash": payload["row_hash"],
+                "source_row_json": json.dumps(payload["source_row_json"], ensure_ascii=False),
+            }
+        )
+
+        for dimension_key, dimension_value in sorted(payload["dimensions"].items()):
+            fact_dimensions.append(
                 {
                     "fact_row_id": fact_row_id,
-                    "topic": topic,
-                    "source_file_id": file_id,
-                    "source_row_index": raw_row["row_index"],
-                    "report_date": payload["report_date"],
-                    "report_date_from": payload["report_date_from"],
-                    "report_date_to": payload["report_date_to"],
-                    "message_date": file_row["message_date"],
-                    "layout_signature": layout_signature,
-                    "row_hash": payload["row_hash"],
-                    "source_row_json": json.dumps(payload["source_row_json"], ensure_ascii=False),
+                    "dimension_key": dimension_key,
+                    "dimension_value": dimension_value,
                 }
             )
 
-            for dimension_key, dimension_value in sorted(payload["dimensions"].items()):
-                fact_dimensions.append(
-                    {
-                        "fact_row_id": fact_row_id,
-                        "dimension_key": dimension_key,
-                        "dimension_value": dimension_value,
-                    }
-                )
+        metric_items = dict(payload["metrics"])
+        metric_items.update(payload["goals"])
+        for metric_key, metric_value in sorted(metric_items.items()):
+            fact_metrics.append(
+                {
+                    "fact_row_id": fact_row_id,
+                    "metric_key": metric_key,
+                    "metric_value": str(metric_value),
+                }
+            )
 
-            metric_items = dict(payload["metrics"])
-            metric_items.update(payload["goals"])
-            for metric_key, metric_value in sorted(metric_items.items()):
-                fact_metrics.append(
-                    {
-                        "fact_row_id": fact_row_id,
-                        "metric_key": metric_key,
-                        "metric_value": str(metric_value),
-                    }
-                )
-
-    return fact_rows, fact_dimensions, fact_metrics
+    return fact_rows, fact_dimensions, fact_metrics, secondary_merge_stats
 
 
 def replace_normalized_rows_for_run(conn, run_date: str) -> None:
@@ -709,7 +811,7 @@ def normalize_run(
         )
         phase("normalize_build_goal_slot_records_finished", goal_slot_records=len(topic_goal_slot_records))
         phase("normalize_build_payloads_started")
-        fact_rows, fact_dimensions, fact_metrics = build_normalized_payloads(
+        fact_rows, fact_dimensions, fact_metrics, secondary_merge_stats = build_normalized_payloads(
             files,
             rows_by_file_id,
             payloads_by_file_id,
@@ -720,6 +822,7 @@ def normalize_run(
             fact_rows=len(fact_rows),
             fact_dimensions=len(fact_dimensions),
             fact_metrics=len(fact_metrics),
+            **secondary_merge_stats,
         )
 
         phase("normalize_replace_rows_started")
@@ -751,6 +854,7 @@ def normalize_run(
         "fact_dimensions": len(fact_dimensions),
         "fact_metrics": len(fact_metrics),
         "goal_slots": len(topic_goal_slot_records),
+        **secondary_merge_stats,
     }
     phase("normalize_finished", **result)
     return result
