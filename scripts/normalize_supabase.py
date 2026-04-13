@@ -330,7 +330,23 @@ def connect_db():
     except ImportError as exc:
         raise RuntimeError("Missing psycopg dependency. Install requirements before running the normalizer.") from exc
 
-    return psycopg.connect(load_connection_string(), row_factory=dict_row)
+    connect_timeout = int(os.getenv("SUPABASE_CONNECT_TIMEOUT_SECONDS", "15"))
+    statement_timeout_ms = int(os.getenv("SUPABASE_STATEMENT_TIMEOUT_MS", "300000"))
+    idle_tx_timeout_ms = int(os.getenv("SUPABASE_IDLE_IN_TX_TIMEOUT_MS", "60000"))
+    application_name = os.getenv("SUPABASE_APPLICATION_NAME", "ym_pipeline")
+
+    options = (
+        f"-c statement_timeout={statement_timeout_ms} "
+        f"-c idle_in_transaction_session_timeout={idle_tx_timeout_ms}"
+    )
+
+    return psycopg.connect(
+        load_connection_string(),
+        row_factory=dict_row,
+        connect_timeout=connect_timeout,
+        application_name=application_name,
+        options=options,
+    )
 
 
 def fetch_ingested_files(conn, run_date: str) -> List[Dict[str, Any]]:
