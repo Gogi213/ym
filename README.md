@@ -40,7 +40,9 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
      - `scripts/normalize/db_connection.py`: DB connection/bootstrap
      - `scripts/normalize/db_reads.py`: raw/state reads
      - `scripts/normalize/db_writes.py`: fact/state writes
-     - `scripts/normalize/db_operator.py`: current/export refresh paths
+     - `scripts/normalize/db_operator_flags.py`: `is_current` refresh path
+     - `scripts/normalize/db_operator_export.py`: operator export refresh path
+     - `scripts/normalize/db_operator.py`: compatibility facade over operator DB modules
      - `scripts/normalize/db.py`: compatibility facade over DB modules
      - `scripts/normalize/pipeline.py`: normalize/finalize orchestration
 6. Python sync scripts write operator views back to Google Sheets.

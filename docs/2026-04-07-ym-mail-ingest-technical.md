@@ -123,6 +123,8 @@
 - [db_connection.py](/C:/visual%20projects/ym/scripts/normalize/db_connection.py)
 - [db_reads.py](/C:/visual%20projects/ym/scripts/normalize/db_reads.py)
 - [db_writes.py](/C:/visual%20projects/ym/scripts/normalize/db_writes.py)
+- [db_operator_flags.py](/C:/visual%20projects/ym/scripts/normalize/db_operator_flags.py)
+- [db_operator_export.py](/C:/visual%20projects/ym/scripts/normalize/db_operator_export.py)
 - [db_operator.py](/C:/visual%20projects/ym/scripts/normalize/db_operator.py)
 - [db.py](/C:/visual%20projects/ym/scripts/normalize/db.py)
 - [pipeline.py](/C:/visual%20projects/ym/scripts/normalize/pipeline.py)
@@ -146,9 +148,12 @@
   - raw/state reads;
 - `db_writes.py`:
   - fact/state writes;
-- `db_operator.py`:
+- `db_operator_flags.py`:
   - `is_current` refresh;
+- `db_operator_export.py`:
   - `operator_export_rows` refresh;
+- `db_operator.py`:
+  - compatibility facade over operator DB submodules;
 - `db.py`:
   - compatibility facade over DB submodules;
 - `pipeline.py`:

@@ -182,6 +182,10 @@
 - `Code.js` больше не является единственным source of truth;
 - Apps Script исходники вынесены в `appsscript-src/` и собираются в deployable `Code.js`;
 - это не меняет ручной deploy, но снижает когнитивную сложность и делает границы модулей явными.
+- `db_operator.py` перестал быть последним локальным SQL-комбайном:
+  - `db_operator_flags.py` отвечает только за `is_current`;
+  - `db_operator_export.py` отвечает только за refresh `operator_export_rows`;
+  - `db_operator.py` оставлен как thin facade для совместимости.
 
 ### 5. Средне: duplicated goal-slot shape в нескольких слоях
 
