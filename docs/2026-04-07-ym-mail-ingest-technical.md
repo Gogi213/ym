@@ -402,6 +402,25 @@ select * from public.goal_mapping_wide order by topic;
 select * from public.export_rows_wide limit 20;
 ```
 
+### Сквозная сверка raw -> wide -> union
+
+На `2026-04-13` выполнена выборочная сквозная валидация сумм `visits` по дням для тем:
+
+- `_SenSoy_`
+- `ЯМ_Замбон_Флуи_фл1_2026_Солта_олв_основные метрики`
+- `Solta_Nektar_2026`
+
+Сверялись три слоя:
+
+- raw строки из `public.ingest_rows`, извлечённые из исходных файлов;
+- агрегаты по `public.export_rows_wide`;
+- агрегаты по листу `union` в Google Sheets.
+
+Результат:
+
+- суммы `visits` по дням совпали `1:1` для всех трёх тем;
+- текущий переход `raw -> wide -> union` не теряет visits и не искажает их при операторской агрегации.
+
 ## Git Status
 
 Рабочая папка является git-репозиторием и синхронизируется с:

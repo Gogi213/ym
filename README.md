@@ -93,6 +93,22 @@ python scripts\normalize_supabase.py --run-date 2026-04-11
   - Python reads pre-aggregated rows from `public.operator_export_rows`
   - the expensive operator aggregation is cached per `run_date` during normalization
 
+## Validation Snapshot
+
+Сквозная сверка `raw -> export_rows_wide -> union` выполнена на `2026-04-13`.
+
+Проверенные темы:
+
+- `_SenSoy_`
+- `ЯМ_Замбон_Флуи_фл1_2026_Солта_олв_основные метрики`
+- `Solta_Nektar_2026`
+
+Во всех трёх случаях суммы `visits` по дням совпали `1:1` между:
+
+- raw строками, извлечёнными из исходных файлов;
+- `public.export_rows_wide`;
+- листом `union` в Google Sheets.
+
 ## Required Configuration
 
 Apps Script properties:
