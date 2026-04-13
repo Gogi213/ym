@@ -154,7 +154,7 @@ def build_operator_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]
 def build_aggregate_key(record: Dict[str, Any]) -> Tuple[Any, ...]:
     key_parts: List[Any] = []
     for key in sorted(record.keys()):
-        if key == "utm_term":
+        if key in {"utm_term", "utm_content"}:
             continue
         if key in AGGREGATABLE_METRIC_COLUMNS:
             continue
@@ -175,6 +175,7 @@ def aggregate_operator_records(records: List[Dict[str, Any]]) -> List[Dict[str, 
         current = grouped.get(key)
         if current is None:
             current = dict(record)
+            current["utm_content"] = "aggregated"
             current["utm_term"] = "aggregated"
             for metric_name in AGGREGATABLE_METRIC_COLUMNS:
                 current[metric_name] = None

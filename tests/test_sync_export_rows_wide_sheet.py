@@ -111,7 +111,7 @@ class BuildExportRowsGridTests(unittest.TestCase):
             ["topic", "bounce_visits", "pageviews", "time_on_site_total", "robot_visits", "goal_1"],
         )
 
-    def test_aggregate_operator_records_collapses_all_terms_into_aggregated(self):
+    def test_aggregate_operator_records_collapses_all_terms_and_contents_into_aggregated(self):
         records = [
             {
                 "topic": "TW",
@@ -121,7 +121,7 @@ class BuildExportRowsGridTests(unittest.TestCase):
                 "utm_source": "solta",
                 "utm_medium": "cpm",
                 "utm_campaign": "cmp",
-                "utm_content": "banner",
+                "utm_content": "banner-1",
                 "utm_term": "term-1",
                 "visits": Decimal("10"),
                 "users": Decimal("9"),
@@ -139,7 +139,7 @@ class BuildExportRowsGridTests(unittest.TestCase):
                 "utm_source": "solta",
                 "utm_medium": "cpm",
                 "utm_campaign": "cmp",
-                "utm_content": "banner",
+                "utm_content": "banner-2",
                 "utm_term": "term-2",
                 "visits": Decimal("7"),
                 "users": Decimal("6"),
@@ -154,6 +154,7 @@ class BuildExportRowsGridTests(unittest.TestCase):
         aggregated = aggregate_operator_records(records)
 
         self.assertEqual(len(aggregated), 1)
+        self.assertEqual(aggregated[0]["utm_content"], "aggregated")
         self.assertEqual(aggregated[0]["utm_term"], "aggregated")
         self.assertEqual(aggregated[0]["visits"], Decimal("17"))
         self.assertEqual(aggregated[0]["users"], Decimal("15"))
@@ -163,7 +164,7 @@ class BuildExportRowsGridTests(unittest.TestCase):
         self.assertEqual(aggregated[0]["robot_rate"], Decimal("3"))
         self.assertEqual(aggregated[0]["goal_1"], Decimal("8"))
 
-    def test_build_export_rows_grid_ignores_hidden_service_fields_when_collapsing_terms(self):
+    def test_build_export_rows_grid_ignores_hidden_service_fields_when_collapsing_terms_and_content(self):
         columns = [
             "topic",
             "report_date",
@@ -210,6 +211,7 @@ class BuildExportRowsGridTests(unittest.TestCase):
         grid = build_export_rows_grid(columns, records)
 
         self.assertEqual(len(grid), 2)
+        self.assertEqual(grid[1][7], "aggregated")
         self.assertEqual(grid[1][8], "aggregated")
         self.assertEqual(grid[1][9], 17)
 
