@@ -76,12 +76,27 @@ python scripts\run_pipeline.py --service-account-json key\service-account.json
 
 If there are no pending `run_date`, it only syncs `pipeline_status` and skips `отчеты` / `union`.
 
+Cold-start behavior:
+
+- if the normalized layer is empty, `run_pipeline.py` automatically switches to bootstrap mode;
+- in bootstrap mode dirty `run_date` values are still processed sequentially, but:
+  - existing normalized rows are not deleted per day;
+  - per-day `is_current` refresh is deferred;
+  - per-day `operator_export_rows` refresh is deferred;
+- after all pending days are loaded, one final reconcile pass refreshes `is_current`, `operator_export_rows`, and `pipeline_runs`.
+
 ## Performance Notes
 
 - Full month rebuild is intentionally expensive:
   - raw ingest can contain tens of thousands of rows
   - each pending `run_date` is normalized separately
   - after normalization, `отчеты`, `union`, and `pipeline_status` are synced back to Google Sheets
+- Shipped optimization for empty-state rebuilds:
+  - bootstrap mode removes the most expensive per-day cleanup/finalize passes
+  - this is the current production path for `empty normalized layer -> rebuild everything`
+- Investigated but not shipped:
+  - two-worker parallel `run_date` rebuild
+  - real measurement on live data regressed versus sequential execution because Postgres contention on `fact_*` outweighed worker overlap
 - For targeted debugging or validation, prefer a single-day run:
 
 ```powershell
@@ -94,10 +109,12 @@ python scripts\normalize_supabase.py --run-date 2026-04-11
   - the expensive operator aggregation is cached per `run_date` during normalization
 - current-state refresh no longer scans all historical rows for an entire topic.
   - normalization refreshes `is_current` only for affected `(topic, row_hash)` keys of the dirty `run_date`
+- latest cold-start measurement after bootstrap fast path:
+  - `2026-04-01 .. 2026-04-12` rebuild from empty normalized layer completed in about `606882ms`
 
 ## Validation Snapshot
 
-Сквозная сверка `raw -> export_rows_wide -> union` выполнена на `2026-04-13` после свежего month-backfill и полного rebuild normalized-слоя.
+Сквозная сверка `raw -> export_rows_wide -> union` выполнена на `2026-04-13` после свежего month-backfill и полного cold rebuild normalized-слоя.
 
 Проверка включала:
 
@@ -121,7 +138,7 @@ python scripts\normalize_supabase.py --run-date 2026-04-11
 
 - `topics_total = 23`
 - `visit_days_total = 223`
-- `goal_points_total = 1784`
+- `goal_points_total = 403`
 - `visit_mismatches = 0`
 - `goal_mismatches = 0`
 
@@ -181,6 +198,7 @@ Python:
 - `sync_export_rows_wide_sheet.py`: write operator-facing `union`
 - `sync_pipeline_status_sheet.py`: write run-level operational status to `pipeline_status`
 - `run_pipeline.py`: detect pending raw `run_date`, run normalization, then sync all operator sheets
+- if normalized tables are empty, it automatically uses bootstrap fast path before final reconcile
 - `public.operator_export_rows`: incremental operator cache table for sheet `union`
 
 ## Operator Union Semantics

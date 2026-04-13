@@ -10,7 +10,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.normalize_supabase import connect_db, normalize_run
+from scripts.normalize_supabase import finalize_normalized_runs, normalize_run, public_payload
 from scripts.sync_export_rows_wide_sheet import sync_export_rows_wide_sheet
 from scripts.sync_goal_mapping_sheet import sync_goal_mapping_sheet
 from scripts.sync_pipeline_status_sheet import fetch_pipeline_status_records, sync_pipeline_status_sheet
@@ -35,8 +35,23 @@ def select_pending_run_dates(records: List[Dict[str, Any]]) -> List[str]:
     return pending
 
 
-def should_sync_full_operator_views(normalized_results: List[Dict[str, Any]]) -> bool:
-    return bool(normalized_results)
+def has_failed_runs(results: List[Dict[str, Any]]) -> bool:
+    return any(str(result.get("error") or "").strip() for result in results)
+
+
+def should_use_bootstrap_mode(records: List[Dict[str, Any]], selected_run_dates: List[str]) -> bool:
+    if not selected_run_dates or not records:
+        return False
+    if any("normalized_rows" not in record for record in records):
+        return False
+    return all(int(record.get("normalized_rows") or 0) == 0 for record in records)
+
+
+def should_sync_full_operator_views(
+    failed_results: List[Dict[str, Any]],
+    normalized_results: List[Dict[str, Any]],
+) -> bool:
+    return bool(normalized_results) and not has_failed_runs(failed_results)
 
 
 def sync_operator_views(*, spreadsheet_id: str, service_account_path: Path) -> Dict[str, Any]:
@@ -73,6 +88,18 @@ def sync_status_only(*, spreadsheet_id: str, service_account_path: Path) -> Dict
     }
 
 
+def normalize_one_run_date(run_date: str, *, bootstrap_mode: bool = False) -> Dict[str, Any]:
+    return {
+        "run_date": run_date,
+        **normalize_run(
+            run_date,
+            logger=log_progress,
+            defer_finalize=True,
+            skip_delete_existing=bootstrap_mode,
+        ),
+    }
+
+
 def run_pipeline(
     *,
     spreadsheet_id: str,
@@ -82,22 +109,49 @@ def run_pipeline(
     status_before = fetch_pipeline_status_records()
     selected_run_dates = run_dates[:] if run_dates else select_pending_run_dates(status_before)
     normalized_results: List[Dict[str, Any]] = []
+    failed_results: List[Dict[str, Any]] = []
+    bootstrap_mode = should_use_bootstrap_mode(status_before, selected_run_dates)
 
     log_progress(
         "pipeline_started",
         {
             "selected_run_dates": selected_run_dates,
             "pending_count": len(selected_run_dates),
+            "bootstrap_mode": bootstrap_mode,
         },
     )
 
     for run_date in selected_run_dates:
         log_progress("normalize_started", {"run_date": run_date})
-        result = normalize_run(run_date, logger=log_progress)
-        normalized_results.append({"run_date": run_date, **result})
-        log_progress("normalize_finished", {"run_date": run_date, **result})
+        try:
+            result = normalize_one_run_date(run_date, bootstrap_mode=bootstrap_mode)
+        except Exception as error:
+            failure = {"run_date": run_date, "error": str(error)}
+            failed_results.append(failure)
+            log_progress("normalize_failed", failure)
+            continue
 
-    full_sync = should_sync_full_operator_views(normalized_results)
+        normalized_results.append(result)
+        log_progress("normalize_finished", public_payload(result))
+
+    if normalized_results:
+        log_progress(
+            "finalize_started",
+            {
+                "run_dates": [result["run_date"] for result in normalized_results],
+                "run_count": len(normalized_results),
+            },
+        )
+        finalize_normalized_runs(normalized_results, logger=None)
+        log_progress(
+            "finalize_finished",
+            {
+                "run_dates": [result["run_date"] for result in normalized_results],
+                "run_count": len(normalized_results),
+            },
+        )
+
+    full_sync = should_sync_full_operator_views(failed_results, normalized_results)
     sync_sheets = ["pipeline_status"] if not full_sync else ["отчеты", "union", "pipeline_status"]
     log_progress("sheet_sync_started", {"sheets": sync_sheets})
     sync_results = (
@@ -118,6 +172,7 @@ def run_pipeline(
         {
             "selected_run_dates": selected_run_dates,
             "normalized_count": len(normalized_results),
+            "failed_count": len(failed_results),
         },
     )
 
@@ -125,6 +180,7 @@ def run_pipeline(
         "ok": True,
         "selected_run_dates": selected_run_dates,
         "normalized": normalized_results,
+        "failed": failed_results,
         "sync": sync_results,
         "status_before": status_before,
         "status_after": status_after,
@@ -151,7 +207,8 @@ def main() -> None:
             {
                 "ok": result["ok"],
                 "selected_run_dates": result["selected_run_dates"],
-                "normalized_runs": result["normalized"],
+                "normalized_runs": [public_payload(item) for item in result["normalized"]],
+                "failed_runs": [public_payload(item) for item in result["failed"]],
                 "sync": result["sync"],
             },
             ensure_ascii=False,

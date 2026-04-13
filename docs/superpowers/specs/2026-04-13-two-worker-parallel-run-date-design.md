@@ -1,5 +1,7 @@
 # Two-Worker Parallel Run-Date Design
 
+> Status: investigated on `2026-04-13`, measured on live data, not shipped. Real runs regressed versus sequential execution because DB contention on `fact_*` outweighed worker overlap. Kept as design record only.
+
 ## Goal
 
 Кратно ускорить полный cold rebuild с пустой базы, не меняя бизнес-семантику пайплайна и не дробя execution model до `file_id`.

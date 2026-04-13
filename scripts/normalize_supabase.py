@@ -66,6 +66,14 @@ def emit_log(
     logger(phase, payload)
 
 
+def public_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: value
+        for key, value in payload.items()
+        if not str(key).startswith("_")
+    }
+
+
 def normalize_header(value: str) -> str:
     normalized = str(value or "").strip().lower().replace("ё", "е")
     normalized = re.sub(r"[^\w]+", "_", normalized, flags=re.UNICODE)
@@ -1118,9 +1126,81 @@ def refresh_operator_export_rows_for_run(conn, run_date: str) -> None:
         )
 
 
+def finalize_normalized_runs(
+    normalized_results: Sequence[Dict[str, Any]],
+    logger: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+) -> None:
+    started_at = time.perf_counter()
+
+    def phase(name: str, **payload: Any) -> None:
+        emit_log(
+            logger,
+            name,
+            {
+                "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                **payload,
+            },
+        )
+
+    successful_results = [result for result in normalized_results if not str(result.get("error") or "").strip()]
+    if not successful_results:
+        return
+
+    affected_row_keys = sorted(
+        {
+            (str(topic), str(row_hash))
+            for result in successful_results
+            for topic, row_hash in result.get("_affected_row_keys", [])
+            if str(topic or "").strip() and str(row_hash or "").strip()
+        }
+    )
+    run_dates = []
+    seen_run_dates = set()
+    for result in successful_results:
+        run_date = str(result.get("run_date") or "").strip()
+        if run_date and run_date not in seen_run_dates:
+            run_dates.append(run_date)
+            seen_run_dates.add(run_date)
+
+    phase(
+        "finalize_normalized_runs_started",
+        run_dates=run_dates,
+        run_count=len(run_dates),
+        row_keys=len(affected_row_keys),
+    )
+
+    with connect_db() as conn:
+        phase("finalize_refresh_flags_started", row_keys=len(affected_row_keys))
+        refresh_current_flags_for_row_keys(conn, affected_row_keys)
+        phase("finalize_refresh_flags_finished")
+
+        for run_date in run_dates:
+            phase("finalize_refresh_operator_export_started", run_date=run_date)
+            refresh_operator_export_rows_for_run(conn, run_date)
+            phase("finalize_refresh_operator_export_finished", run_date=run_date)
+
+        for result in successful_results:
+            run_date = str(result["run_date"])
+            phase("finalize_mark_ready_started", run_date=run_date)
+            mark_pipeline_run_ready(
+                conn,
+                run_date,
+                files_count=int(result.get("files") or 0),
+                fact_rows_count=int(result.get("fact_rows") or 0),
+            )
+            phase("finalize_mark_ready_finished", run_date=run_date)
+
+        phase("finalize_commit_started")
+        conn.commit()
+        phase("finalize_commit_finished")
+
+
 def normalize_run(
     run_date: str,
     logger: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    *,
+    defer_finalize: bool = False,
+    skip_delete_existing: bool = False,
 ) -> Dict[str, int]:
     started_at = time.perf_counter()
 
@@ -1185,9 +1265,13 @@ def normalize_run(
                 fact_metrics=len(fact_metrics),
                 **secondary_merge_stats,
             )
-            phase("normalize_delete_existing_rows_started")
-            deleted_row_keys = delete_existing_rows_for_run(conn, run_date)
-            phase("normalize_delete_existing_rows_finished", row_keys=len(deleted_row_keys))
+            if skip_delete_existing:
+                deleted_row_keys = []
+                phase("normalize_delete_existing_skipped")
+            else:
+                phase("normalize_delete_existing_rows_started")
+                deleted_row_keys = delete_existing_rows_for_run(conn, run_date)
+                phase("normalize_delete_existing_rows_finished", row_keys=len(deleted_row_keys))
             affected_row_keys = build_affected_row_keys(
                 existing_keys=deleted_row_keys,
                 fact_rows=fact_rows,
@@ -1205,20 +1289,21 @@ def normalize_run(
             phase("normalize_insert_fact_metrics_started", fact_metrics=len(fact_metrics))
             insert_fact_metrics(conn, fact_metrics)
             phase("normalize_insert_fact_metrics_finished")
-            phase("normalize_refresh_flags_started", row_keys=len(affected_row_keys))
-            refresh_current_flags_for_row_keys(conn, affected_row_keys)
-            phase("normalize_refresh_flags_finished")
-            phase("normalize_refresh_operator_export_started")
-            refresh_operator_export_rows_for_run(conn, run_date)
-            phase("normalize_refresh_operator_export_finished")
-            phase("normalize_mark_ready_started")
-            mark_pipeline_run_ready(
-                conn,
-                run_date,
-                files_count=len(files),
-                fact_rows_count=len(fact_rows),
-            )
-            phase("normalize_mark_ready_finished")
+            if not defer_finalize:
+                phase("normalize_refresh_flags_started", row_keys=len(affected_row_keys))
+                refresh_current_flags_for_row_keys(conn, affected_row_keys)
+                phase("normalize_refresh_flags_finished")
+                phase("normalize_refresh_operator_export_started")
+                refresh_operator_export_rows_for_run(conn, run_date)
+                phase("normalize_refresh_operator_export_finished")
+                phase("normalize_mark_ready_started")
+                mark_pipeline_run_ready(
+                    conn,
+                    run_date,
+                    files_count=len(files),
+                    fact_rows_count=len(fact_rows),
+                )
+                phase("normalize_mark_ready_finished")
             phase("normalize_commit_started")
             conn.commit()
             phase("normalize_commit_finished")
@@ -1237,7 +1322,9 @@ def normalize_run(
         "goal_slots": len(topic_goal_slot_records),
         **secondary_merge_stats,
     }
-    phase("normalize_finished", **result)
+    if defer_finalize:
+        result["_affected_row_keys"] = affected_row_keys
+    phase("normalize_finished", **public_payload(result))
     return result
 
 
@@ -1253,7 +1340,10 @@ def main() -> None:
         print(json.dumps({"phase": phase, **payload}, ensure_ascii=False), flush=True)
 
     result = normalize_run(args.run_date, logger=cli_logger)
-    print(json.dumps({"ok": True, "run_date": args.run_date, **result}, ensure_ascii=False), flush=True)
+    print(
+        json.dumps({"ok": True, "run_date": args.run_date, **public_payload(result)}, ensure_ascii=False),
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

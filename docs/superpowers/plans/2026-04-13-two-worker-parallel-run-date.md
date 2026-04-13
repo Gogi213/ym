@@ -1,5 +1,7 @@
 # Two-Worker Parallel Run-Date Implementation Plan
 
+> Status: measured on live data on `2026-04-13` and intentionally not shipped. Sequential bootstrap fast path outperformed two-worker execution because Postgres contention on `fact_*` dominated the run.
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Speed up cold rebuilds by processing dirty `run_date` values in parallel with two workers while keeping current day-scoped normalization semantics, current validation semantics, and current sheet contracts.

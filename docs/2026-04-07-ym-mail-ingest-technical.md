@@ -108,6 +108,16 @@
 - оркестрировать `normalize + sheet sync` одной командой;
 - не трогать raw или normalized данные в БД.
 
+Важно:
+
+- текущий production entrypoint для post-processing — `run_pipeline.py`;
+- если normalized-слой пустой, orchestrator автоматически включает bootstrap fast path;
+- bootstrap fast path не меняет бизнес-логику, но убирает самые дорогие per-day finalize шаги:
+  - без per-day delete existing normalized rows;
+  - без per-day `is_current` refresh;
+  - без per-day `operator_export_rows` refresh;
+- после загрузки всех dirty дней делается один общий finalize-pass.
+
 ## Raw Layer
 
 Текущие raw-таблицы:
@@ -372,8 +382,9 @@ Sparse-слой метрик:
 
 1. Apps Script грузит raw-слой за целевую дату.
 2. `python scripts\run_pipeline.py --service-account-json ...` находит pending `run_date`.
-3. Orchestrator прогоняет `normalize_supabase.py` по нужным датам.
-4. Orchestrator синкает:
+3. Если normalized-слой пустой, orchestrator включает bootstrap fast path.
+4. Orchestrator прогоняет `normalize_supabase.py` по нужным датам.
+5. Orchestrator синкает:
    - `отчеты`
    - `union`
    - `pipeline_status`
@@ -402,6 +413,12 @@ Sparse-слой метрик:
 - для операционного прогона это нормальный путь;
 - для точечной валидации конкретной темы или дня не надо гонять весь `run_pipeline.py`;
 - правильнее запускать точечно `normalize_supabase.py --run-date ...` и проверять нужный срез отдельно.
+
+Что уже проверено на живой базе:
+
+- двухворкерный parallel-by-day rebuild был измерен и отвергнут;
+- на реальных данных он оказался медленнее последовательного режима из-за DB contention на `fact_*`;
+- текущий shipped path для empty-state rebuild — bootstrap fast path, а не two-worker execution.
 
 Это не считается багом пайплайна само по себе.
 Это текущая стоимость инкрементального rebuild без полного пересчёта уже готовых дней.
@@ -448,11 +465,12 @@ select * from public.export_rows_wide limit 20;
 
 ### Сквозная сверка raw -> wide -> union
 
-На `2026-04-13` выполнена выборочная сквозная валидация сумм `visits` по дням для тем:
+На `2026-04-13` после свежего cold rebuild выполнена полная сквозная валидация:
 
-- `_SenSoy_`
-- `ЯМ_Замбон_Флуи_фл1_2026_Солта_олв_основные метрики`
-- `Solta_Nektar_2026`
+- всех `ingested` тем;
+- всех дней `2026-04-01 .. 2026-04-12`;
+- сумм `visits` по дням;
+- сумм `goal_*` по дням.
 
 Сверялись три слоя:
 
@@ -462,8 +480,15 @@ select * from public.export_rows_wide limit 20;
 
 Результат:
 
-- суммы `visits` по дням совпали `1:1` для всех трёх тем;
-- текущий переход `raw -> wide -> union` не теряет visits и не искажает их при операторской агрегации.
+- `raw_visit_keys = 223`
+- `wide_visit_keys = 223`
+- `sheet_visit_keys = 223`
+- `raw_goal_keys = 403`
+- `wide_goal_keys = 403`
+- `sheet_goal_keys = 403`
+- `visit_mismatches = 0`
+- `goal_mismatches = 0`
+- текущий переход `raw -> wide -> union` не теряет visits и не искажает goal-метрики при операторской агрегации.
 
 ## Git Status
 

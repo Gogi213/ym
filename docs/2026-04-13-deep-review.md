@@ -4,7 +4,7 @@
 
 Скоуп ревью:
 
-- все коммиты текущей ветки/истории проекта от `a5c064a` до `885efdb`;
+- все коммиты текущей ветки/истории проекта от `a5c064a` до рабочего состояния `2026-04-13`;
 - баги и ошибки;
 - архитектура, дизайн, логика и математика;
 - дублирование, избыточность, переусложнение;
@@ -75,6 +75,13 @@
 - Плюс: появилась реальная, а не декларативная сквозная валидация.
 - Плюс: был найден и исправлен реальный баг в row identity / dedup.
 - Вывод: проект уже способен ловить математические расхождения, а не только “выглядит ок”.
+
+### `2026-04-13` post-review performance pass
+
+- Плюс: shipped bootstrap fast path для empty normalized layer.
+- Плюс: cold rebuild теперь не тратит время на per-day delete/finalize passes.
+- Плюс: подтверждена полная сквозная валидация `raw -> wide -> union` после cold rebuild.
+- Вывод: правильный perf-pass оказался не в two-worker parallelism, а в снятии самых дорогих per-day finalize шагов.
 
 ---
 
@@ -235,7 +242,7 @@
 
 Чего не хватает:
 
-- более локального current-state refresh;
+- меньшего объёма per-day rewrite даже после bootstrap;
 - лучшего разбиения normalizer на фазы с явными boundaries;
 - более явного execution model, чем один длинный orchestration process.
 
@@ -268,6 +275,24 @@
 - после сужения scope и объединения `delete + affected keys`:
   - `normalize_finished ~60s`
   - `refresh_flags ~6s`
+
+### Priority 2
+
+- не распараллеливать dirty `run_date`, а удешевить empty-state rebuild через bootstrap fast path
+
+Почему:
+
+- live measurement показал, что two-worker parallelism даёт regression из-за DB contention на `fact_*`;
+- реальный shipped выигрыш даёт перенос delete/finalize из per-day hot path в один общий finalize-pass.
+
+Статус:
+
+- исправлено в рабочем коде `2026-04-13`;
+- при пустом normalized-слое `run_pipeline.py` автоматически включает bootstrap mode;
+- full cold rebuild `2026-04-01 .. 2026-04-12` после этого завершён примерно за `606882ms`;
+- после rebuild выполнена полная сквозная сверка:
+  - `visit_mismatches = 0`
+  - `goal_mismatches = 0`
 
 Новый главный hotspot после этого фикса:
 
