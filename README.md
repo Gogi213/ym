@@ -75,6 +75,20 @@ python scripts\run_pipeline.py --service-account-json key\service-account.json
 
 If there are no pending `run_date`, it only syncs `pipeline_status` and skips `отчеты` / `union`.
 
+## Performance Notes
+
+- Full month rebuild is intentionally expensive:
+  - raw ingest can contain tens of thousands of rows
+  - each pending `run_date` is normalized separately
+  - after normalization, `отчеты`, `union`, and `pipeline_status` are synced back to Google Sheets
+- For targeted debugging or validation, prefer a single-day run:
+
+```powershell
+python scripts\normalize_supabase.py --run-date 2026-04-11
+```
+
+- `run_pipeline.py` is the correct operator entrypoint when the goal is to fully refresh pending dates and then refresh sheets.
+
 ## Required Configuration
 
 Apps Script properties:
