@@ -95,19 +95,34 @@ python scripts\normalize_supabase.py --run-date 2026-04-11
 
 ## Validation Snapshot
 
-Сквозная сверка `raw -> export_rows_wide -> union` выполнена на `2026-04-13`.
+Сквозная сверка `raw -> export_rows_wide -> union` выполнена на `2026-04-13` после полного rebuild normalized-слоя.
 
-Проверенные темы:
+Проверка включала:
 
-- `_SenSoy_`
-- `ЯМ_Замбон_Флуи_фл1_2026_Солта_олв_основные метрики`
-- `Solta_Nektar_2026`
+- все темы, которые дошли до `public.ingest_files` со статусом `ingested`;
+- суммы `visits` по дням;
+- суммы `goal_1 ... goal_N` по дням для всех тем, у которых есть goal-слоты;
+- сравнение между:
+  - raw строками, извлечёнными из исходных файлов;
+  - `public.export_rows_wide`;
+  - листом `union` в Google Sheets.
 
-Во всех трёх случаях суммы `visits` по дням совпали `1:1` между:
+Итог проверки:
 
-- raw строками, извлечёнными из исходных файлов;
-- `public.export_rows_wide`;
-- листом `union` в Google Sheets.
+- `visit_mismatches = 0`
+- `goal_mismatches = 0`
+
+Причина последнего критичного фикса:
+
+- старая dedup-логика строила `row_hash` только по каноническим dimensions и `report_date`;
+- это схлопывало строки, которые различались по неканоническим текстовым dimensions;
+- в некоторых темах goal-значения оказывались только в не-current версии строки.
+
+Что изменено:
+
+- `row_hash` теперь учитывает unmapped text dimensions, если они реально влияют на идентичность строки;
+- при этом он по-прежнему игнорирует метрики, durations, даты и goal-like числовые поля;
+- после фикса выполнен полный rebuild и повторная валидация всей цепочки.
 
 ## Required Configuration
 

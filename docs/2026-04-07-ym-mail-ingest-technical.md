@@ -188,6 +188,13 @@ Wide-view для операционного листа с расшифровко
 - `is_current`
 - `source_row_json`
 
+Важно:
+
+- `row_hash` больше не строится только по каноническим UTM-dimensions;
+- в identity строки также попадают unmapped text dimensions, если они различают реальные строки отчёта;
+- metric-like, duration-like, date-like и goal-like поля в identity не участвуют;
+- это нужно, чтобы `is_current` не схлопывал разные строки в одну только потому, что различие сидит в неканоническом текстовом поле.
+
 ### fact_dimensions
 
 Sparse-слой измерений:
@@ -255,6 +262,21 @@ Sparse-слой метрик:
 - source of truth остаётся в `fact_*` и `export_rows_wide`;
 - `operator_export_rows` нужен только для быстрого operator sync;
 - Python больше не тянет десятки тысяч wide-строк в память ради одного листа.
+
+## Validation Status
+
+После фикса `row_hash` / `is_current` и полного rebuild на `2026-04-13` выполнена полная валидация:
+
+- `raw ingest_rows` против `public.export_rows_wide`
+- `public.export_rows_wide` против листа `union`
+- по всем темам
+- по `visits`
+- по всем существующим `goal_N`
+
+Результат:
+
+- `visit_mismatches = 0`
+- `goal_mismatches = 0`
 
 ## Operator Union Export
 

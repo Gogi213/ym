@@ -137,6 +137,70 @@ class NormalizeSupabaseTests(unittest.TestCase):
         self.assertEqual(payload["goals"], {"goal_1": Decimal("2.0"), "goal_2": Decimal("5.0")})
         self.assertTrue(payload["row_hash"])
 
+    def test_build_fact_payload_row_hash_changes_for_unmapped_text_dimension(self):
+        left = build_fact_payload(
+            topic="Solaris HC_feb'26_Solta OLV",
+            file_id="file-1",
+            row_index=1,
+            row={
+                "UTM Source": "solta_olv",
+                "UTM Content": "video_credit_pv",
+                "Дата визита": "2026-04-09",
+                "Визиты": "3.0",
+                "Домен реферера": "away.vk.com",
+            },
+            message_date="2026-04-10T01:32:05+00:00",
+            goal_slots={},
+        )
+        right = build_fact_payload(
+            topic="Solaris HC_feb'26_Solta OLV",
+            file_id="file-1",
+            row_index=2,
+            row={
+                "UTM Source": "solta_olv",
+                "UTM Content": "video_credit_pv",
+                "Дата визита": "2026-04-09",
+                "Визиты": "3.0",
+                "Домен реферера": "Не определено",
+            },
+            message_date="2026-04-10T01:32:05+00:00",
+            goal_slots={},
+        )
+
+        self.assertNotEqual(left["row_hash"], right["row_hash"])
+
+    def test_build_fact_payload_row_hash_ignores_target_visit_metrics(self):
+        left = build_fact_payload(
+            topic="Solaris HC_feb'26_Solta OLV",
+            file_id="file-1",
+            row_index=1,
+            row={
+                "UTM Source": "solta_olv",
+                "UTM Content": "video_credit_pv",
+                "Дата визита": "2026-04-09",
+                "Визиты": "3.0",
+                "Целевые визиты (SA Форма отправлена - Фин.программа)": "0.0",
+            },
+            message_date="2026-04-10T01:32:05+00:00",
+            goal_slots={},
+        )
+        right = build_fact_payload(
+            topic="Solaris HC_feb'26_Solta OLV",
+            file_id="file-1",
+            row_index=2,
+            row={
+                "UTM Source": "solta_olv",
+                "UTM Content": "video_credit_pv",
+                "Дата визита": "2026-04-09",
+                "Визиты": "3.0",
+                "Целевые визиты (SA Форма отправлена - Фин.программа)": "1.0",
+            },
+            message_date="2026-04-10T01:32:05+00:00",
+            goal_slots={},
+        )
+
+        self.assertEqual(left["row_hash"], right["row_hash"])
+
     def test_build_layout_signature_depends_on_normalized_header_order(self):
         self.assertEqual(
             build_layout_signature(["UTM Source", "Визиты", "Посетители"]),

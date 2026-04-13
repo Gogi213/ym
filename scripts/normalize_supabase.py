@@ -5,6 +5,7 @@ import base64
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
+from decimal import InvalidOperation
 import hashlib
 import io
 import json
@@ -40,6 +41,18 @@ BASE_METRIC_KEYS = {
     "page_depth",
     "time_on_site_seconds",
     "robot_rate",
+}
+
+IGNORED_IDENTITY_HEADER_PREFIXES = (
+    "целевые_визиты",
+    "конверсия",
+)
+
+IGNORED_IDENTITY_HEADERS = {
+    "дата_визита",
+    "просмотры_товаров",
+    "посетители_посмотревшие_товар",
+    "посетители_добавившие_товар_в_корзину",
 }
 
 
@@ -166,7 +179,10 @@ def parse_metric_value(raw_value: str) -> Optional[Decimal]:
     value = str(raw_value or "").strip().replace(" ", "").replace(",", ".")
     if not value:
         return None
-    return Decimal(value)
+    try:
+        return Decimal(value)
+    except InvalidOperation:
+        return None
 
 
 def parse_duration_to_seconds(raw_value: str) -> Optional[int]:
@@ -178,6 +194,33 @@ def parse_duration_to_seconds(raw_value: str) -> Optional[int]:
         return None
     hours, minutes, seconds = (int(part) for part in parts)
     return hours * 3600 + minutes * 60 + seconds
+
+
+def header_affects_row_identity(header: str, raw_value: str) -> bool:
+    value = str(raw_value or "").strip()
+    if not value:
+        return False
+
+    normalized = normalize_header(header)
+    if normalized in IGNORED_IDENTITY_HEADERS:
+        return False
+    if any(normalized.startswith(prefix) for prefix in IGNORED_IDENTITY_HEADER_PREFIXES):
+        return False
+
+    field = canonical_field_for_header(header)
+    if field is not None:
+        return False
+
+    if parse_duration_to_seconds(value) is not None:
+        return False
+    if parse_metric_value(value) is not None:
+        return False
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+        return False
+    if re.match(r"^\d{2}\.\d{2}\.\d{4}$", value):
+        return False
+
+    return True
 
 
 def extract_report_date(*, row: Dict[str, str], message_date: str) -> str:
@@ -222,8 +265,12 @@ def build_fact_payload(
     dimensions: Dict[str, str] = {}
     metrics: Dict[str, Decimal] = {}
     goals: Dict[str, Decimal] = {}
+    identity_dimensions: Dict[str, str] = {}
 
     for header, raw_value in row.items():
+        if header_affects_row_identity(header, str(raw_value or "")):
+            identity_dimensions[normalize_header(header)] = str(raw_value or "").strip()
+
         field = canonical_field_for_header(header)
         if field is None:
             continue
@@ -261,6 +308,7 @@ def build_fact_payload(
     row_hash_payload = {
         "topic": topic,
         "dimensions": dimensions,
+        "identity_dimensions": identity_dimensions,
         "report_date": report_date,
     }
     row_hash = hashlib.sha256(
