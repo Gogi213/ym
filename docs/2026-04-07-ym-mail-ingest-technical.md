@@ -28,7 +28,10 @@
 
 ### Apps Script
 
-Файл: [Code.js](/C:/visual%20projects/ym/Code.js)
+Файлы:
+
+- [appsscript-src](/C:/visual%20projects/ym/appsscript-src)
+- [Code.js](/C:/visual%20projects/ym/Code.js)
 
 Ответственность:
 
@@ -50,17 +53,64 @@
   - `primary_topic`
   - `topic_role = primary | secondary`
 
+Структура исходников:
+
+- `appsscript-src/00_config_and_topics.js`
+  - config;
+  - topic loading;
+  - topic matching;
+- `appsscript-src/10_dates_and_matching.js`
+  - date helpers;
+  - Gmail search;
+  - candidate collection;
+- `appsscript-src/20_transport_and_runtime.js`
+  - HTTP request shaping;
+  - runtime/settings;
+  - response/assert helpers;
+- `appsscript-src/30_entrypoints.js`
+  - `runForDate_`;
+  - `run()`;
+  - `runMonthBackfill()`.
+
+Важно:
+
+- `Code.js` больше не является source of truth;
+- deployable single-file artifact собирается из `appsscript-src/` через:
+  - [build_appsscript_bundle.py](/C:/visual%20projects/ym/scripts/build_appsscript_bundle.py)
+
 ### Supabase Edge Function
 
-Файл: [index.ts](/C:/visual%20projects/ym/supabase/functions/mail-ingest/index.ts)
+Файлы:
+
+- [index.ts](/C:/visual%20projects/ym/supabase/functions/mail-ingest/index.ts)
+- [auth.ts](/C:/visual%20projects/ym/supabase/functions/mail-ingest/auth.ts)
+- [handlers.ts](/C:/visual%20projects/ym/supabase/functions/mail-ingest/handlers.ts)
+- [parse.ts](/C:/visual%20projects/ym/supabase/functions/mail-ingest/parse.ts)
+- [shared.ts](/C:/visual%20projects/ym/supabase/functions/mail-ingest/shared.ts)
+- [supabase.ts](/C:/visual%20projects/ym/supabase/functions/mail-ingest/supabase.ts)
 
 Ответственность:
 
-- принимать `reset` и `multipart/form-data`;
-- классифицировать файл как `ingested`, `skipped`, `error`;
-- сохранять файл в `public.ingest_file_payloads`;
-- сохранять file-level метаданные в `public.ingest_files`;
-- сохранять распарсенные строки в `public.ingest_rows`, если файл распознан как валидная UTM-таблица.
+- `index.ts`:
+  - thin entrypoint;
+  - routing `reset` vs `multipart/form-data`;
+- `auth.ts`:
+  - ingest token auth;
+- `handlers.ts`:
+  - request validation;
+  - ingest/reset orchestration;
+  - error handling;
+- `parse.ts`:
+  - `csv/xlsx` table detection;
+  - parsing debug payload;
+- `shared.ts`:
+  - shared types;
+  - header helpers;
+  - common HTTP helpers;
+- `supabase.ts`:
+  - admin client bootstrap;
+  - raw writes;
+  - `pipeline_runs` state updates.
 
 ### Python normalizer
 

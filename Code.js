@@ -359,6 +359,7 @@ function buildResetPayload_(runDate) {
   };
 }
 
+
 function buildAttachmentMetadata_(input) {
   return {
     action: 'ingest',
@@ -598,6 +599,7 @@ function fetchRunDateExists_(urlFetchApp, settings, runDate) {
 
   return Array.isArray(response.json) && response.json.length > 0;
 }
+
 
 function runForDate_(runtime, runDate, startedAtMs, runContext, options) {
   const context = runContext || buildRunContext_(runtime);

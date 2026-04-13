@@ -5,7 +5,9 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 ## What Lives Here
 
 - [Code.js](./Code.js): Apps Script intake from Gmail to Supabase
-- [supabase/functions/mail-ingest/index.ts](./supabase/functions/mail-ingest/index.ts): ingest Edge Function
+- [appsscript-src](./appsscript-src): modular Apps Script source used to generate `Code.js`
+- [supabase/functions/mail-ingest/index.ts](./supabase/functions/mail-ingest/index.ts): thin ingest Edge Function entrypoint
+- [supabase/functions/mail-ingest](./supabase/functions/mail-ingest): split Edge Function modules (`auth / handlers / parse / shared / supabase`)
 - [supabase/migrations](./supabase/migrations): database schema
 - [scripts/normalize_supabase.py](./scripts/normalize_supabase.py): thin CLI/public facade for the normalizer
 - [scripts/normalize](./scripts/normalize): modular normalizer package
@@ -22,6 +24,12 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
    - column `B` = optional secondary topic with conversions
 2. Apps Script finds matching Gmail messages and uploads `xlsx/csv` attachments to the Supabase Edge Function.
 3. Supabase stores raw files and extracted raw rows.
+   - package boundaries:
+     - `auth.ts`: token auth
+     - `handlers.ts`: reset/ingest request handlers
+     - `parse.ts`: `csv/xlsx` table detection and parsing
+     - `shared.ts`: shared types and HTTP helpers
+     - `supabase.ts`: raw writes and `pipeline_runs` updates
 4. Python normalizer builds canonical fact tables and `export_rows_wide`.
    - secondary topics do not become standalone operator topics
    - they are attached to their `primary_topic` only when the exact grain matches
@@ -46,9 +54,21 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 Node / Apps Script helpers:
 
 ```powershell
+python scripts\build_appsscript_bundle.py
 npm test
 node --check Code.js
 ```
+
+Apps Script source of truth:
+
+- edit files in `appsscript-src/`
+- rebuild `Code.js` with:
+
+```powershell
+python scripts\build_appsscript_bundle.py
+```
+
+- `Code.js` remains the deployable single-file artifact for manual Apps Script copy/paste
 
 Python:
 
