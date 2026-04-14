@@ -22,7 +22,7 @@
 
 - `Turso bootstrap schema`
 - `Python libsql runtime`
-- будущий `Python HTTP ingest service`
+- `Python HTTP ingest service` scaffold
 - будущий `Turso raw + normalized + operator cache`
 
 Что уже реализовано:
@@ -577,6 +577,29 @@ $env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
 $env:TURSO_AUTH_TOKEN='<db-token>'
 python scripts\bootstrap_turso.py
 ```
+
+### Python ingest service scaffold
+
+Уже реализовано:
+
+- [ingest_service/app.py](/C:/visual%20projects/ym/ingest_service/app.py)
+- [ingest_service/auth.py](/C:/visual%20projects/ym/ingest_service/auth.py)
+- [ingest_service/models.py](/C:/visual%20projects/ym/ingest_service/models.py)
+
+Что уже есть:
+
+- `GET /health`
+- `POST /reset`
+- `POST /ingest`
+- auth по `x-ingest-token`
+- route-level contract, совместимый по форме с текущим Apps Script transport
+
+Что ещё не перенесено в этот слой:
+
+- parsing `csv/xlsx`
+- raw writes в Turso
+- обновление `pipeline_runs`
+- production startup/deploy
 
 ## Verification
 

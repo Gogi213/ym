@@ -18,6 +18,7 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 - [scripts/turso_runtime.py](./scripts/turso_runtime.py): libSQL/Turso Python connection bootstrap
 - [scripts/bootstrap_turso.py](./scripts/bootstrap_turso.py): apply Turso-compatible schema bootstrap
 - [turso/bootstrap_schema.sql](./turso/bootstrap_schema.sql): Turso/libSQL bootstrap DDL
+- [ingest_service](./ingest_service): new Python HTTP ingest service scaffold for Turso cutover
 - [docs](./docs): business, technical, and deployment notes
 
 ## Current Storage State
@@ -29,12 +30,14 @@ Turso migration work has started:
 - Turso-compatible bootstrap schema exists in [turso/bootstrap_schema.sql](./turso/bootstrap_schema.sql)
 - Python runtime can connect to Turso via `libsql`
 - bootstrap can be applied from Python via [bootstrap_turso.py](./scripts/bootstrap_turso.py)
+- thin FastAPI ingest service scaffold exists in [ingest_service](./ingest_service)
 
 What is not cut over yet:
 
 - Apps Script still uploads to Supabase
 - Python normalizer still reads and writes Supabase/Postgres
 - operator sheet sync still reads Supabase-backed views/tables
+- FastAPI ingest service does not yet own parsing/storage writes
 
 ## Runtime Shape
 

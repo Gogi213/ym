@@ -1,4 +1,7 @@
 psycopg[binary]>=3.2,<3.3
 libsql>=0.1,<1
+fastapi>=0.116,<1
+uvicorn>=0.35,<1
+python-multipart>=0.0.20,<1
 gspread>=6.1,<7
 google-auth>=2.39,<3
