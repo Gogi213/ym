@@ -85,6 +85,80 @@ class IngestServiceHandlersTests(unittest.TestCase):
         self.assertEqual(pipeline["raw_rows"], 2)
         self.assertEqual(pipeline["normalize_status"], "pending_normalize")
 
+    def test_reset_clears_existing_raw_data_for_run_date(self):
+        from ingest_service.app import create_app
+        from ingest_service.handlers import create_runtime_handlers
+
+        connection = build_connection()
+        handlers = create_runtime_handlers(connection)
+        client = TestClient(
+            create_app(
+                ingest_token="secret",
+                reset_handler=handlers.reset_handler,
+                ingest_handler=handlers.ingest_handler,
+            )
+        )
+
+        meta = {
+            "action": "ingest",
+            "run_date": "2026-04-14",
+            "primary_topic": "topic-primary",
+            "matched_topic": "topic-primary",
+            "topic_role": "primary",
+            "message_subject": "Subject",
+            "message_date": "2026-04-14T09:00:00Z",
+            "message_id": "message-1",
+            "thread_id": "thread-1",
+            "attachment_name": "report.csv",
+            "attachment_type": "csv",
+        }
+        csv_payload = "UTM Source;UTM Campaign;Визиты\ngoogle;brand;10\n".encode("utf-8")
+
+        client.post(
+            "/reset",
+            headers={"x-ingest-token": "secret"},
+            json={"action": "reset", "run_date": "2026-04-14"},
+        )
+        client.post(
+            "/ingest",
+            headers={"x-ingest-token": "secret"},
+            data={"meta": json.dumps(meta)},
+            files={"file": ("report.csv", io.BytesIO(csv_payload), "text/csv")},
+        )
+
+        before_reset_files = connection.execute(
+            "select count(*) from ingest_files where run_date = ?",
+            ("2026-04-14",),
+        ).fetchone()[0]
+        self.assertEqual(before_reset_files, 1)
+
+        reset_response = client.post(
+            "/reset",
+            headers={"x-ingest-token": "secret"},
+            json={"action": "reset", "run_date": "2026-04-14"},
+        )
+
+        files_after_reset = connection.execute(
+            "select count(*) from ingest_files where run_date = ?",
+            ("2026-04-14",),
+        ).fetchone()[0]
+        rows_after_reset = connection.execute(
+            "select count(*) from ingest_rows where run_date = ?",
+            ("2026-04-14",),
+        ).fetchone()[0]
+        pipeline = connection.execute(
+            "select raw_revision, raw_files, raw_rows, normalize_status from pipeline_runs where run_date = ?",
+            ("2026-04-14",),
+        ).fetchone()
+
+        self.assertEqual(reset_response.status_code, 200)
+        self.assertEqual(files_after_reset, 0)
+        self.assertEqual(rows_after_reset, 0)
+        self.assertEqual(pipeline["raw_revision"], 2)
+        self.assertEqual(pipeline["raw_files"], 0)
+        self.assertEqual(pipeline["raw_rows"], 0)
+        self.assertEqual(pipeline["normalize_status"], "pending_normalize")
+
 
 if __name__ == "__main__":
     unittest.main()

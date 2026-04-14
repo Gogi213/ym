@@ -33,6 +33,7 @@ Turso migration work has started:
 - thin FastAPI ingest service scaffold exists in [ingest_service](./ingest_service)
 - Turso raw storage adapter exists in [ingest_service/storage.py](./ingest_service/storage.py)
 - Python ingest service parsing and route handlers exist in [ingest_service/parse.py](./ingest_service/parse.py) and [ingest_service/handlers.py](./ingest_service/handlers.py)
+- runtime wiring and live smoke against `ym-migration-20260414` are already verified
 
 What is not cut over yet:
 

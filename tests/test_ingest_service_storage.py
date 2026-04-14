@@ -11,7 +11,132 @@ def build_sqlite_connection():
     return connection
 
 
+class TupleCursorAdapter:
+    def __init__(self, cursor):
+        self._cursor = cursor
+        self.description = cursor.description
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is None:
+            return None
+        return tuple(row)
+
+    def fetchall(self):
+        return [tuple(row) for row in self._cursor.fetchall()]
+
+
+class TupleRowConnectionAdapter:
+    def __init__(self, connection):
+        self._connection = connection
+
+    def execute(self, *args, **kwargs):
+        return TupleCursorAdapter(self._connection.execute(*args, **kwargs))
+
+    def executemany(self, *args, **kwargs):
+        return self._connection.executemany(*args, **kwargs)
+
+    def commit(self):
+        return self._connection.commit()
+
+
+class SyncTrackingConnection:
+    def __init__(self, connection):
+        self._connection = connection
+        self.sync_calls = 0
+
+    def execute(self, *args, **kwargs):
+        return self._connection.execute(*args, **kwargs)
+
+    def executemany(self, *args, **kwargs):
+        return self._connection.executemany(*args, **kwargs)
+
+    def commit(self):
+        return self._connection.commit()
+
+    def sync(self):
+        self.sync_calls += 1
+
+
 class IngestServiceStorageTests(unittest.TestCase):
+    def test_storage_helpers_support_tuple_rows_with_cursor_description(self):
+        from ingest_service.storage import (
+            insert_file_record,
+            mark_pipeline_run_after_reset,
+            refresh_pipeline_run_after_ingest,
+        )
+
+        base_connection = build_sqlite_connection()
+        connection = TupleRowConnectionAdapter(base_connection)
+
+        mark_pipeline_run_after_reset(connection, "2026-04-14")
+        insert_file_record(
+            connection,
+            {
+                "run_date": "2026-04-14",
+                "message_id": "message-1",
+                "thread_id": "thread-1",
+                "message_date": "2026-04-14T09:00:00Z",
+                "message_subject": "Subject",
+                "primary_topic": "topic-primary",
+                "matched_topic": "topic-primary",
+                "topic_role": "primary",
+                "attachment_name": "report.xlsx",
+            },
+            attachment_type="xlsx",
+            status="ingested",
+            header=["UTM Source"],
+            row_count=2,
+            error_text=None,
+        )
+        refresh_pipeline_run_after_ingest(connection, "2026-04-14")
+
+        pipeline = base_connection.execute(
+            "select raw_revision, raw_files, raw_rows, normalize_status from pipeline_runs where run_date = ?",
+            ("2026-04-14",),
+        ).fetchone()
+
+        self.assertEqual(pipeline["raw_revision"], 1)
+        self.assertEqual(pipeline["raw_files"], 1)
+        self.assertEqual(pipeline["raw_rows"], 2)
+        self.assertEqual(pipeline["normalize_status"], "pending_normalize")
+
+    def test_write_helpers_call_sync_when_connection_supports_it(self):
+        from ingest_service.storage import (
+            insert_file_payload_record,
+            insert_file_record,
+            insert_row_records,
+            mark_pipeline_run_after_reset,
+            refresh_pipeline_run_after_ingest,
+        )
+
+        connection = SyncTrackingConnection(build_sqlite_connection())
+        mark_pipeline_run_after_reset(connection, "2026-04-14")
+        file_id = insert_file_record(
+            connection,
+            {
+                "run_date": "2026-04-14",
+                "message_id": "message-1",
+                "thread_id": "thread-1",
+                "message_date": "2026-04-14T09:00:00Z",
+                "message_subject": "Subject",
+                "primary_topic": "topic-primary",
+                "matched_topic": "topic-primary",
+                "topic_role": "primary",
+                "attachment_name": "report.csv",
+            },
+            attachment_type="csv",
+            status="ingested",
+            header=["UTM Source", "Визиты"],
+            row_count=1,
+            error_text=None,
+        )
+        insert_file_payload_record(connection, file_id, "text/csv", b"abc")
+        insert_row_records(connection, file_id, "2026-04-14", [{"UTM Source": "google", "Визиты": "1"}])
+        refresh_pipeline_run_after_ingest(connection, "2026-04-14")
+
+        self.assertEqual(connection.sync_calls, 5)
+
     def test_mark_pipeline_run_after_reset_initializes_run_state(self):
         from ingest_service.storage import mark_pipeline_run_after_reset
 

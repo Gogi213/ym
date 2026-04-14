@@ -10,12 +10,73 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _row_value(row, columns: list[str], key: str, default=None):
+    if row is None:
+        return default
+    if isinstance(row, dict):
+        return row.get(key, default)
+    try:
+        return row[key]
+    except (TypeError, KeyError, IndexError):
+        pass
+    if hasattr(row, "keys"):
+        try:
+            return row[key]
+        except Exception:
+            pass
+    try:
+        index = columns.index(key)
+    except ValueError:
+        return default
+    return row[index] if index < len(row) else default
+
+
+def _fetchone_with_columns(cursor):
+    row = cursor.fetchone()
+    columns = [description[0] for description in (cursor.description or [])]
+    return row, columns
+
+
+def _fetchall_with_columns(cursor):
+    rows = cursor.fetchall()
+    columns = [description[0] for description in (cursor.description or [])]
+    return rows, columns
+
+
+def _commit_and_sync(connection) -> None:
+    connection.commit()
+    sync = getattr(connection, "sync", None)
+    if callable(sync):
+        sync()
+
+
 def mark_pipeline_run_after_reset(connection, run_date: str) -> None:
-    existing = connection.execute(
+    file_id_cursor = connection.execute(
+        "select id from ingest_files where run_date = ?",
+        (run_date,),
+    )
+    file_ids, columns = _fetchall_with_columns(file_id_cursor)
+    resolved_file_ids = [_row_value(row, columns, "id") for row in file_ids]
+    if resolved_file_ids:
+        placeholders = ", ".join(["?"] * len(resolved_file_ids))
+        connection.execute(
+            f"delete from ingest_file_payloads where file_id in ({placeholders})",
+            tuple(resolved_file_ids),
+        )
+        connection.execute(
+            f"delete from ingest_rows where file_id in ({placeholders})",
+            tuple(resolved_file_ids),
+        )
+    connection.execute(
+        "delete from ingest_files where run_date = ?",
+        (run_date,),
+    )
+    existing_cursor = connection.execute(
         "select raw_revision from pipeline_runs where run_date = ?",
         (run_date,),
-    ).fetchone()
-    next_revision = int(existing["raw_revision"] if existing else 0) + 1
+    )
+    existing, columns = _fetchone_with_columns(existing_cursor)
+    next_revision = int(_row_value(existing, columns, "raw_revision", 0) or 0) + 1
     now = _utc_now_iso()
     connection.execute(
         """
@@ -38,7 +99,7 @@ def mark_pipeline_run_after_reset(connection, run_date: str) -> None:
         """,
         (run_date, next_revision, now, now),
     )
-    connection.commit()
+    _commit_and_sync(connection)
 
 
 def insert_file_record(
@@ -77,7 +138,7 @@ def insert_file_record(
             error_text,
         ),
     )
-    connection.commit()
+    _commit_and_sync(connection)
     return file_id
 
 
@@ -100,7 +161,7 @@ def insert_file_payload_record(
             base64.b64encode(bytes_payload).decode("ascii"),
         ),
     )
-    connection.commit()
+    _commit_and_sync(connection)
 
 
 def insert_row_records(connection, file_id: str, run_date: str, rows: list[dict[str, str]]) -> None:
@@ -120,21 +181,22 @@ def insert_row_records(connection, file_id: str, run_date: str, rows: list[dict[
         """,
         payload,
     )
-    connection.commit()
+    _commit_and_sync(connection)
 
 
 def refresh_pipeline_run_after_ingest(connection, run_date: str) -> None:
-    files = connection.execute(
+    files_cursor = connection.execute(
         "select status, row_count from ingest_files where run_date = ?",
         (run_date,),
-    ).fetchall()
+    )
+    files, columns = _fetchall_with_columns(files_cursor)
     total_files = len(files)
     ingested_files = 0
     raw_rows = 0
     for row in files:
-        if row["status"] == "ingested":
+        if _row_value(row, columns, "status") == "ingested":
             ingested_files += 1
-            raw_rows += int(row["row_count"] or 0)
+            raw_rows += int(_row_value(row, columns, "row_count", 0) or 0)
 
     now = _utc_now_iso()
     connection.execute(
@@ -160,4 +222,4 @@ def refresh_pipeline_run_after_ingest(connection, run_date: str) -> None:
             run_date,
         ),
     )
-    connection.commit()
+    _commit_and_sync(connection)

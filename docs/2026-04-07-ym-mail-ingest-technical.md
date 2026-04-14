@@ -666,6 +666,30 @@ python scripts\bootstrap_turso.py
 - cutover Apps Script на этот endpoint;
 - живой ingest smoke уже не на in-memory bootstrap, а на реальную Turso migration DB.
 
+### Live Turso smoke status
+
+На `2026-04-14` новый Python ingest service уже прогнан против реальной migration DB:
+
+- DB: `ym-migration-20260414`
+- transport: `uvicorn ingest_service.main:app`
+- requests:
+  - `POST /reset`
+  - `POST /ingest`
+
+Подтверждённый результат после свежего `reset + ingest`:
+
+- `ingest_files where run_date = '2026-04-14'` -> `1`
+- `ingest_rows where run_date = '2026-04-14'` -> `2`
+- `pipeline_runs` -> `raw_files=1`, `raw_rows=2`, `normalize_status='pending_normalize'`
+
+`raw_revision` при этом должен увеличиваться на каждый `reset`, поэтому его абсолютное значение не считается фиксированным smoke-contract.
+
+Это важно:
+
+- новый runtime уже не только тестовый;
+- raw write-path в реальный Turso/libSQL подтверждён;
+- следующий cutover риск сидит уже не в ingest transport, а в переносе normalizer и sheet sync.
+
 ## Verification
 
 Минимальные проверки:
