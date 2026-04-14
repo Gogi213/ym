@@ -14,6 +14,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts.normalize.db import connect_db
+from scripts.normalize.query_utils import execute_select
 
 
 SCOPES = [
@@ -74,15 +75,14 @@ def apply_goal_mapping_to_sheet_values(
 
 def fetch_goal_mapping_records() -> List[Dict[str, Any]]:
     with connect_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select *
-                from public.goal_mapping_wide
-                order by topic
-                """
-            )
-            return list(cur.fetchall())
+        return execute_select(
+            conn,
+            """
+            select *
+            from goal_mapping_wide
+            order by topic
+            """,
+        )
 
 
 def open_sheet(spreadsheet_id: str, sheet_name: str, service_account_path: Path):

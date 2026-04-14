@@ -16,6 +16,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts.normalize.db import connect_db
+from scripts.normalize.query_utils import execute_select
 
 
 SCOPES = [
@@ -148,17 +149,39 @@ def chunk_grid_rows(grid: List[List[str]], batch_size: int) -> List[List[List[st
 
 def fetch_export_rows() -> tuple[List[str], List[Dict[str, Any]]]:
     with connect_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select *
-                from public.operator_export_rows
-                order by report_date, topic, utm_source, utm_medium, utm_campaign
-                """
-            )
-            rows = list(cur.fetchall())
-            columns = [desc.name for desc in cur.description]
-            return columns, rows
+        rows = execute_select(
+            conn,
+            """
+            select *
+            from operator_export_rows
+            order by report_date, topic, utm_source, utm_medium, utm_campaign
+            """,
+        )
+        columns = list(rows[0].keys()) if rows else []
+        if not columns:
+            columns = [
+                "row_id",
+                "run_date",
+                "topic",
+                "report_date",
+                "report_date_from",
+                "report_date_to",
+                "utm_source",
+                "utm_medium",
+                "utm_campaign",
+                "utm_content",
+                "utm_term",
+                "visits",
+                "users",
+                "bounce_rate",
+                "page_depth",
+                "time_on_site_seconds",
+                "robot_rate",
+                *[f"goal_{index}" for index in range(1, 26)],
+                "created_at",
+                "updated_at",
+            ]
+        return columns, rows
 
 
 def open_sheet(spreadsheet_id: str, sheet_name: str, service_account_path: Path):

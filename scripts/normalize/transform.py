@@ -15,6 +15,14 @@ from .fields import (
 )
 
 
+def _message_date_to_text(value: Any) -> str:
+    if not value:
+        return ""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
 def collect_goal_slots(
     files: Sequence[Dict[str, Any]],
     existing_goal_slots: Dict[str, Dict[str, int]],
@@ -146,7 +154,7 @@ def build_normalized_payloads(
         topic_role = str(file_row.get("topic_role") or "primary")
         headers = file_row.get("header_json") or []
         layout_signature = build_layout_signature(headers)
-        message_date = file_row["message_date"].isoformat() if file_row.get("message_date") else ""
+        message_date = _message_date_to_text(file_row.get("message_date"))
         goal_slots = goal_slots_by_topic.get(primary_topic, {})
         payload_row = payloads_by_file_id.get(file_id, {})
         file_report_period = extract_report_period_from_payload(

@@ -7,6 +7,7 @@ from scripts.normalize_supabase import (
     build_fact_payload,
     build_layout_signature,
     build_merge_key,
+    build_normalized_payloads,
     build_pipeline_run_error_update,
     build_pipeline_run_ready_update,
     build_topic_goal_slot_records,
@@ -359,6 +360,40 @@ class NormalizeSupabaseTests(unittest.TestCase):
                 "ambiguous_secondary_rows": 0,
             },
         )
+
+    def test_build_normalized_payloads_accepts_string_message_date_and_decoded_raw_json(self):
+        fact_rows, fact_dimensions, fact_metrics, secondary_merge_stats = build_normalized_payloads(
+            files=[
+                {
+                    "id": "file-1",
+                    "matched_topic": "Topic A",
+                    "primary_topic": "Topic A",
+                    "topic_role": "primary",
+                    "header_json": ["UTM Source", "Визиты"],
+                    "message_date": "2026-04-14T10:00:00Z",
+                    "attachment_type": "csv",
+                }
+            ],
+            rows_by_file_id={
+                "file-1": [
+                    {
+                        "row_index": 1,
+                        "row_json": {
+                            "UTM Source": "google",
+                            "Визиты": "2",
+                        },
+                    }
+                ]
+            },
+            payloads_by_file_id={"file-1": {"file_base64": None}},
+            goal_slots_by_topic={},
+        )
+
+        self.assertEqual(len(fact_rows), 1)
+        self.assertEqual(len(fact_dimensions), 1)
+        self.assertEqual(len(fact_metrics), 1)
+        self.assertEqual(fact_rows[0]["message_date"], "2026-04-14T10:00:00Z")
+        self.assertEqual(secondary_merge_stats["matched_secondary_rows"], 0)
 
     def test_build_pipeline_run_ready_update_shapes_explicit_ready_state(self):
         self.assertEqual(

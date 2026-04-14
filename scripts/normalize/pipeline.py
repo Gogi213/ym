@@ -24,6 +24,12 @@ from .fields import build_topic_goal_slot_records
 from .transform import build_affected_row_keys, build_normalized_payloads, collect_goal_slots
 
 
+def _sync_if_supported(conn) -> None:
+    sync = getattr(conn, "sync", None)
+    if callable(sync):
+        sync()
+
+
 def finalize_normalized_runs(
     normalized_results: Sequence[Dict[str, Any]],
     logger: Optional[Callable[[str, Dict[str, Any]], None]] = None,
@@ -90,6 +96,7 @@ def finalize_normalized_runs(
 
         phase("finalize_commit_started")
         conn.commit()
+        _sync_if_supported(conn)
         phase("finalize_commit_finished")
 
 
@@ -204,6 +211,7 @@ def normalize_run(
                 phase("normalize_mark_ready_finished")
             phase("normalize_commit_started")
             conn.commit()
+            _sync_if_supported(conn)
             phase("normalize_commit_finished")
         except Exception as error:
             conn.rollback()

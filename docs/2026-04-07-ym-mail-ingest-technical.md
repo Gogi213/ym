@@ -4,8 +4,8 @@
 
 Текущий production-контур больше не использует Google Drive staging.
 
-Параллельно начат полный переезд storage/runtime слоя с Supabase/Postgres на Turso/libSQL.
-На текущий момент Turso bootstrap уже поднят и проверен, но production traffic ещё не cut over.
+Параллельно идёт полный переезд storage/runtime слоя с Supabase/Postgres на Turso/libSQL.
+На текущий момент Turso bootstrap, raw ingest, normalizer backend и operator read-path уже проверены живым smoke, но production traffic ещё не cut over.
 
 Рабочая цепочка сейчас такая:
 
@@ -22,8 +22,10 @@
 
 - `Turso bootstrap schema`
 - `Python libsql runtime`
-- `Python HTTP ingest service` scaffold
-- будущий `Turso raw + normalized + operator cache`
+- `Python HTTP ingest service`
+- `Turso raw + normalized + operator cache`
+- backend-switchable `Python normalizer`
+- backend-aware operator sheet sync read-path
 
 Что уже реализовано:
 
@@ -33,6 +35,9 @@
 - сохранение raw-слоя файлов и строк;
 - нормализация в канонический sparse-слой;
 - построение wide-export view в Supabase.
+- raw ingest в Turso/libSQL;
+- normalize/write/operator refresh в Turso/libSQL;
+- чтение `goal_mapping_wide`, `operator_export_rows`, `pipeline_runs` из Turso/libSQL.
 
 ## Runtime Components
 
@@ -138,6 +143,12 @@
 - [db_operator.py](/C:/visual%20projects/ym/scripts/normalize/db_operator.py)
 - [db.py](/C:/visual%20projects/ym/scripts/normalize/db.py)
 - [pipeline.py](/C:/visual%20projects/ym/scripts/normalize/pipeline.py)
+- [turso_connection.py](/C:/visual%20projects/ym/scripts/normalize/turso_connection.py)
+- [turso_reads.py](/C:/visual%20projects/ym/scripts/normalize/turso_reads.py)
+- [turso_writes.py](/C:/visual%20projects/ym/scripts/normalize/turso_writes.py)
+- [turso_operator_flags.py](/C:/visual%20projects/ym/scripts/normalize/turso_operator_flags.py)
+- [turso_operator_export.py](/C:/visual%20projects/ym/scripts/normalize/turso_operator_export.py)
+- [query_utils.py](/C:/visual%20projects/ym/scripts/normalize/query_utils.py)
 
 Ответственность:
 
@@ -165,10 +176,27 @@
 - `db_operator.py`:
   - compatibility facade over operator DB submodules;
 - `db.py`:
-  - compatibility facade over DB submodules;
+  - backend selector facade;
+  - выбирает Postgres или Turso через `NORMALIZE_DB_BACKEND`;
 - `pipeline.py`:
   - `normalize_run`;
   - `finalize_normalized_runs`.
+
+Turso-специфичные модули:
+
+- `turso_connection.py`:
+  - подключение к libSQL/Turso через shared runtime;
+- `turso_reads.py`:
+  - raw/state reads;
+  - декодирование `header_json` и `row_json` из text storage обратно в Python structures;
+- `turso_writes.py`:
+  - fact/state writes без Postgres-only SQL;
+- `turso_operator_flags.py`:
+  - `is_current` refresh без temp table dependency;
+- `turso_operator_export.py`:
+  - operator export refresh на SQLite/libSQL-compatible SQL;
+- `query_utils.py`:
+  - общая row-normalization для Postgres cursor rows и libSQL tuple rows.
 
 Правило merge secondary в primary:
 
@@ -641,9 +669,9 @@ python scripts\bootstrap_turso.py
 
 Что пока ещё не доделано:
 
-- production app factory с реальным Turso connection lifecycle;
 - cutover Apps Script на новый endpoint;
-- перенос normalizer/sheet sync на Turso backend.
+- переключение production env на Turso по умолчанию;
+- переключение `run_pipeline.py` и production sheet sync на Turso env по умолчанию.
 
 ### Python ingest runtime wiring
 
@@ -688,7 +716,22 @@ python scripts\bootstrap_turso.py
 
 - новый runtime уже не только тестовый;
 - raw write-path в реальный Turso/libSQL подтверждён;
-- следующий cutover риск сидит уже не в ingest transport, а в переносе normalizer и sheet sync.
+- следующий cutover риск сидит уже не в ingest transport, а в полном переключении runtime endpoint и orchestrator env.
+
+Дополнительно на той же migration DB уже подтверждено:
+
+- `NORMALIZE_DB_BACKEND=turso python -m scripts.normalize_supabase --run-date 2026-04-14`
+- чтение:
+  - `pipeline_status`
+  - `operator_export_rows`
+  - `goal_mapping_wide`
+
+Подтверждённый результат:
+
+- `normalize_finished` на Turso/libSQL без Postgres backend;
+- `pipeline_runs.normalize_status = 'ready'`;
+- `operator_export_rows` содержит агрегированные строки;
+- `goal_mapping_wide` читается через Python sync read-path без `public.*` и Postgres cursor assumptions.
 
 ## Verification
 

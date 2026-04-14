@@ -23,57 +23,58 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 
 ## Current Storage State
 
-Current production runtime still uses Supabase for raw storage, normalized storage, and operator cache.
+Current production runtime still uses Supabase for live traffic, but the Turso migration already covers more than bootstrap.
 
 Turso migration work has started:
 
 - Turso-compatible bootstrap schema exists in [turso/bootstrap_schema.sql](./turso/bootstrap_schema.sql)
 - Python runtime can connect to Turso via `libsql`
 - bootstrap can be applied from Python via [bootstrap_turso.py](./scripts/bootstrap_turso.py)
-- thin FastAPI ingest service scaffold exists in [ingest_service](./ingest_service)
-- Turso raw storage adapter exists in [ingest_service/storage.py](./ingest_service/storage.py)
-- Python ingest service parsing and route handlers exist in [ingest_service/parse.py](./ingest_service/parse.py) and [ingest_service/handlers.py](./ingest_service/handlers.py)
-- runtime wiring and live smoke against `ym-migration-20260414` are already verified
+- Python ingest service exists in [ingest_service](./ingest_service) and already writes raw data to Turso
+- normalizer has backend selection via `NORMALIZE_DB_BACKEND=turso`
+- Turso-compatible read/write/operator modules exist under [scripts/normalize](./scripts/normalize)
+- operator read-path for `goal_mapping / union / pipeline_status` already works against Turso-backed tables/views
+- runtime wiring and live smoke against `ym-migration-20260414` are already verified for:
+  - `reset + ingest`
+  - `normalize`
+  - `pipeline_status / operator_export_rows / goal_mapping_wide` reads
 
 What is not cut over yet:
 
 - Apps Script still uploads to Supabase
-- Python normalizer still reads and writes Supabase/Postgres
-- operator sheet sync still reads Supabase-backed views/tables
-- FastAPI ingest service does not yet own parsing/storage writes
-- FastAPI ingest service still lacks production startup/runtime wiring to Turso env
+- production env is not cut over to Turso by default
 - Apps Script still points to Supabase, not the new Python service
+- `run_pipeline.py` still runs against Supabase unless Turso env/backend is explicitly set
 
 ## Runtime Shape
 
 1. Apps Script reads topic bindings from spreadsheet `17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA`, sheet `отчеты`:
    - column `A` = primary topic
    - column `B` = optional secondary topic with conversions
-2. Apps Script finds matching Gmail messages and uploads `xlsx/csv` attachments to the Supabase Edge Function.
-3. Supabase stores raw files and extracted raw rows.
+2. Apps Script finds matching Gmail messages and uploads `xlsx/csv` attachments to the current ingest endpoint.
+3. Current production ingest path:
+   - Supabase Edge Function stores raw files and extracted raw rows.
    - package boundaries:
      - `auth.ts`: token auth
      - `handlers.ts`: reset/ingest request handlers
      - `parse.ts`: `csv/xlsx` table detection and parsing
      - `shared.ts`: shared types and HTTP helpers
      - `supabase.ts`: raw writes and `pipeline_runs` updates
-4. Python normalizer builds canonical fact tables and `export_rows_wide`.
+4. Migration ingest path:
+   - Python FastAPI ingest service writes the same raw layer into Turso/libSQL.
+5. Python normalizer builds canonical fact tables and `export_rows_wide`.
    - secondary topics do not become standalone operator topics
    - they are attached to their `primary_topic` only when the exact grain matches
-5. Python normalizer also refreshes `public.operator_export_rows` only for dirty `run_date`.
+6. Python normalizer also refreshes `operator_export_rows` only for dirty `run_date`.
    - package boundaries:
      - `scripts/normalize/fields.py`: header parsing, row parsing, row identity
      - `scripts/normalize/transform.py`: goal-slot collection, secondary merge, fact payload assembly
-     - `scripts/normalize/db_connection.py`: DB connection/bootstrap
-     - `scripts/normalize/db_reads.py`: raw/state reads
-     - `scripts/normalize/db_writes.py`: fact/state writes
-     - `scripts/normalize/db_operator_flags.py`: `is_current` refresh path
-     - `scripts/normalize/db_operator_export.py`: operator export refresh path
-     - `scripts/normalize/db_operator.py`: compatibility facade over operator DB modules
-     - `scripts/normalize/db.py`: compatibility facade over DB modules
+     - `scripts/normalize/db*.py`: Postgres backend
+     - `scripts/normalize/turso_*.py`: Turso/libSQL backend
+     - `scripts/normalize/db.py`: backend selector facade
      - `scripts/normalize/pipeline.py`: normalize/finalize orchestration
-6. Python sync scripts write operator views back to Google Sheets.
-6. `union` is not a raw wide dump. It is an operator-facing export:
+7. Python sync scripts write operator views back to Google Sheets.
+8. `union` is not a raw wide dump. It is an operator-facing export:
    - `utm_term` is fully collapsed to `aggregated`
    - additive metrics are precomputed for aggregation
    - dates and numbers are written as typed sheet values
@@ -141,6 +142,15 @@ $env:INGEST_TOKEN='<ingest-token>'
 $env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
 $env:TURSO_AUTH_TOKEN='<db-token>'
 uvicorn ingest_service.main:app --host 0.0.0.0 --port 8000
+```
+
+Turso-backed normalizer smoke:
+
+```powershell
+$env:NORMALIZE_DB_BACKEND='turso'
+$env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
+$env:TURSO_AUTH_TOKEN='<db-token>'
+python -m scripts.normalize_supabase --run-date 2026-04-14
 ```
 
 `run_pipeline.py` now prints phase logs and timings during execution:
@@ -249,6 +259,8 @@ Python environment:
 or
 - `SUPABASE_POOLER_URL`
 - `SUPABASE_DB_PASSWORD`
+- optional backend switch for the normalizer:
+  - `NORMALIZE_DB_BACKEND=turso`
 
 Turso bootstrap environment:
 
@@ -277,6 +289,7 @@ Apps Script:
 Python:
 
 - `normalize_supabase.py`: rebuild normalized layer for a specific `run_date`
+- the same entrypoint can run on Turso/libSQL when `NORMALIZE_DB_BACKEND=turso` is set
 - secondary topic rows are merged into primary topic rows only on exact grain:
   - `report_date`
   - `report_date_from`

@@ -15,6 +15,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts.normalize.db import connect_db
+from scripts.normalize.query_utils import execute_select
 
 
 SCOPES = [
@@ -45,71 +46,70 @@ def classify_pipeline_status(record: Dict[str, Any]) -> str:
 
 def fetch_pipeline_status_records() -> List[Dict[str, Any]]:
     with connect_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                with run_state as (
-                  select
-                    pr.run_date,
-                    pr.raw_revision,
-                    pr.normalize_status,
-                    pr.raw_files,
-                    pr.raw_rows,
-                    pr.normalized_files,
-                    pr.normalized_rows,
-                    pr.last_ingest_at,
-                    pr.normalized_at,
-                    pr.last_error
-                  from public.pipeline_runs pr
-                ),
-                ingest_summary as (
-                  select
-                    f.run_date,
-                    count(*) as total_files,
-                    count(*) filter (where f.status = 'ingested') as ingested_files,
-                    count(*) filter (where f.status = 'skipped') as skipped_files,
-                    count(*) filter (where f.status = 'error') as error_files,
-                    coalesce(sum(f.row_count) filter (where f.status = 'ingested'), 0) as raw_rows,
-                    min(f.message_date) as first_message_at,
-                    max(f.message_date) as last_message_at
-                  from public.ingest_files f
-                  group by f.run_date
-                ),
-                normalized_summary as (
-                  select
-                    f.run_date,
-                    count(distinct fr.source_file_id) as normalized_files,
-                    count(*) as normalized_rows,
-                    max(fr.created_at) as normalized_at
-                  from public.fact_rows fr
-                  join public.ingest_files f on f.id = fr.source_file_id
-                  group by f.run_date
-                )
-                select
-                  rs.run_date,
-                  rs.raw_revision,
-                  rs.normalize_status,
-                  coalesce(i.total_files, rs.raw_files, 0) as total_files,
-                  coalesce(i.ingested_files, 0) as ingested_files,
-                  coalesce(i.skipped_files, 0) as skipped_files,
-                  coalesce(i.error_files, 0) as error_files,
-                  coalesce(rs.raw_rows, i.raw_rows, 0) as raw_rows,
-                  coalesce(rs.normalized_files, n.normalized_files, 0) as normalized_files,
-                  coalesce(rs.normalized_rows, n.normalized_rows, 0) as normalized_rows,
-                  coalesce(i.first_message_at, rs.last_ingest_at) as first_message_at,
-                  coalesce(i.last_message_at, rs.last_ingest_at) as last_message_at,
-                  coalesce(rs.normalized_at, n.normalized_at) as normalized_at,
-                  rs.last_error
-                from run_state rs
-                left join ingest_summary i on i.run_date = rs.run_date
-                left join normalized_summary n on n.run_date = rs.run_date
-                order by rs.run_date desc
-                """
+        records = execute_select(
+            conn,
+            """
+            with run_state as (
+              select
+                pr.run_date,
+                pr.raw_revision,
+                pr.normalize_status,
+                pr.raw_files,
+                pr.raw_rows,
+                pr.normalized_files,
+                pr.normalized_rows,
+                pr.last_ingest_at,
+                pr.normalized_at,
+                pr.last_error
+              from pipeline_runs pr
+            ),
+            ingest_summary as (
+              select
+                f.run_date,
+                count(*) as total_files,
+                sum(case when f.status = 'ingested' then 1 else 0 end) as ingested_files,
+                sum(case when f.status = 'skipped' then 1 else 0 end) as skipped_files,
+                sum(case when f.status = 'error' then 1 else 0 end) as error_files,
+                coalesce(sum(case when f.status = 'ingested' then f.row_count else 0 end), 0) as raw_rows,
+                min(f.message_date) as first_message_at,
+                max(f.message_date) as last_message_at
+              from ingest_files f
+              group by f.run_date
+            ),
+            normalized_summary as (
+              select
+                f.run_date,
+                count(distinct fr.source_file_id) as normalized_files,
+                count(*) as normalized_rows,
+                max(fr.created_at) as normalized_at
+              from fact_rows fr
+              join ingest_files f on f.id = fr.source_file_id
+              group by f.run_date
             )
-            records = list(cur.fetchall())
-            for record in records:
-                record["pipeline_status"] = classify_pipeline_status(record)
-            return records
+            select
+              rs.run_date,
+              rs.raw_revision,
+              rs.normalize_status,
+              coalesce(i.total_files, rs.raw_files, 0) as total_files,
+              coalesce(i.ingested_files, 0) as ingested_files,
+              coalesce(i.skipped_files, 0) as skipped_files,
+              coalesce(i.error_files, 0) as error_files,
+              coalesce(rs.raw_rows, i.raw_rows, 0) as raw_rows,
+              coalesce(rs.normalized_files, n.normalized_files, 0) as normalized_files,
+              coalesce(rs.normalized_rows, n.normalized_rows, 0) as normalized_rows,
+              coalesce(i.first_message_at, rs.last_ingest_at) as first_message_at,
+              coalesce(i.last_message_at, rs.last_ingest_at) as last_message_at,
+              coalesce(rs.normalized_at, n.normalized_at) as normalized_at,
+              rs.last_error
+            from run_state rs
+            left join ingest_summary i on i.run_date = rs.run_date
+            left join normalized_summary n on n.run_date = rs.run_date
+            order by rs.run_date desc
+            """,
+        )
+        for record in records:
+            record["pipeline_status"] = classify_pipeline_status(record)
+        return records
 
 
 def build_pipeline_status_grid(records: List[Dict[str, Any]]) -> List[List[Any]]:
