@@ -593,12 +593,12 @@ python scripts\bootstrap_turso.py
 - `POST /ingest`
 - auth по `x-ingest-token`
 - route-level contract, совместимый по форме с текущим Apps Script transport
+- `csv/xlsx` parsing port в Python
+- route handlers, которые уже умеют писать raw/state в SQLite-compatible bootstrap schema
 
 Что ещё не перенесено в этот слой:
 
-- parsing `csv/xlsx`
-- route-to-storage integration
-- обновление `pipeline_runs`
+- production startup/deploy wiring на Turso env
 - production startup/deploy
 
 ### Turso raw storage adapter
@@ -619,7 +619,31 @@ python scripts\bootstrap_turso.py
 
 - это Turso/libSQL-compatible write-path для raw ingest;
 - тестируется на SQLite-compatible bootstrap schema;
-- станет storage backbone для нового Python ingest service после route integration и parsing port.
+- уже используется runtime handlers внутри нового Python ingest service в integration tests.
+
+### Python ingest parsing and handlers
+
+Уже реализовано:
+
+- [ingest_service/parse.py](/C:/visual%20projects/ym/ingest_service/parse.py)
+- [ingest_service/types.py](/C:/visual%20projects/ym/ingest_service/types.py)
+- [ingest_service/handlers.py](/C:/visual%20projects/ym/ingest_service/handlers.py)
+
+Что покрыто:
+
+- CSV delimiter detection;
+- XLSX table detection через zip/xml parsing;
+- поиск table block по UTM header;
+- skip summary rows `Итого/Total`;
+- reset handler;
+- ingest handler;
+- запись raw rows, payload и `pipeline_runs` в bootstrap schema.
+
+Что пока ещё не доделано:
+
+- production app factory с реальным Turso connection lifecycle;
+- cutover Apps Script на новый endpoint;
+- перенос normalizer/sheet sync на Turso backend.
 
 ## Verification
 

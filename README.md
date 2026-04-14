@@ -32,6 +32,7 @@ Turso migration work has started:
 - bootstrap can be applied from Python via [bootstrap_turso.py](./scripts/bootstrap_turso.py)
 - thin FastAPI ingest service scaffold exists in [ingest_service](./ingest_service)
 - Turso raw storage adapter exists in [ingest_service/storage.py](./ingest_service/storage.py)
+- Python ingest service parsing and route handlers exist in [ingest_service/parse.py](./ingest_service/parse.py) and [ingest_service/handlers.py](./ingest_service/handlers.py)
 
 What is not cut over yet:
 
@@ -39,7 +40,8 @@ What is not cut over yet:
 - Python normalizer still reads and writes Supabase/Postgres
 - operator sheet sync still reads Supabase-backed views/tables
 - FastAPI ingest service does not yet own parsing/storage writes
-- FastAPI ingest service is not yet wired end-to-end to storage and parsing at runtime
+- FastAPI ingest service still lacks production startup/runtime wiring to Turso env
+- Apps Script still points to Supabase, not the new Python service
 
 ## Runtime Shape
 
