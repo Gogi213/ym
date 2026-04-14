@@ -15,7 +15,26 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 - [scripts/sync_export_rows_wide_sheet.py](./scripts/sync_export_rows_wide_sheet.py): operator union sync to sheet `union`
 - [scripts/sync_pipeline_status_sheet.py](./scripts/sync_pipeline_status_sheet.py): pipeline status sync to sheet `pipeline_status`
 - [scripts/run_pipeline.py](./scripts/run_pipeline.py): one-command orchestrator for `normalize + sync`
+- [scripts/turso_runtime.py](./scripts/turso_runtime.py): libSQL/Turso Python connection bootstrap
+- [scripts/bootstrap_turso.py](./scripts/bootstrap_turso.py): apply Turso-compatible schema bootstrap
+- [turso/bootstrap_schema.sql](./turso/bootstrap_schema.sql): Turso/libSQL bootstrap DDL
 - [docs](./docs): business, technical, and deployment notes
+
+## Current Storage State
+
+Current production runtime still uses Supabase for raw storage, normalized storage, and operator cache.
+
+Turso migration work has started:
+
+- Turso-compatible bootstrap schema exists in [turso/bootstrap_schema.sql](./turso/bootstrap_schema.sql)
+- Python runtime can connect to Turso via `libsql`
+- bootstrap can be applied from Python via [bootstrap_turso.py](./scripts/bootstrap_turso.py)
+
+What is not cut over yet:
+
+- Apps Script still uploads to Supabase
+- Python normalizer still reads and writes Supabase/Postgres
+- operator sheet sync still reads Supabase-backed views/tables
 
 ## Runtime Shape
 
@@ -97,6 +116,14 @@ One-command post-ingest pipeline:
 
 ```powershell
 python scripts\run_pipeline.py --service-account-json key\service-account.json
+```
+
+Turso bootstrap:
+
+```powershell
+$env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
+$env:TURSO_AUTH_TOKEN='<db-token>'
+python scripts\bootstrap_turso.py
 ```
 
 `run_pipeline.py` now prints phase logs and timings during execution:
@@ -205,6 +232,12 @@ Python environment:
 or
 - `SUPABASE_POOLER_URL`
 - `SUPABASE_DB_PASSWORD`
+
+Turso bootstrap environment:
+
+- `TURSO_DATABASE_URL`
+- `TURSO_AUTH_TOKEN`
+- optional `TURSO_LOCAL_REPLICA_PATH`
 
 Google Sheets sync:
 

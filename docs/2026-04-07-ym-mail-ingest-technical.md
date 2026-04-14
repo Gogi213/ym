@@ -4,6 +4,9 @@
 
 Текущий production-контур больше не использует Google Drive staging.
 
+Параллельно начат полный переезд storage/runtime слоя с Supabase/Postgres на Turso/libSQL.
+На текущий момент Turso bootstrap уже поднят и проверен, но production traffic ещё не cut over.
+
 Рабочая цепочка сейчас такая:
 
 - `Gmail`
@@ -14,6 +17,13 @@
 - `Supabase export view`
 - `Supabase operator export cache`
 - `Python operator sheet sync`
+
+Миграционный контур сейчас такой:
+
+- `Turso bootstrap schema`
+- `Python libsql runtime`
+- будущий `Python HTTP ingest service`
+- будущий `Turso raw + normalized + operator cache`
 
 Что уже реализовано:
 
@@ -532,6 +542,40 @@ Python dependency:
 
 ```powershell
 python -m pip install -r requirements.txt
+```
+
+### Turso bootstrap
+
+Уже реализовано:
+
+- [turso/bootstrap_schema.sql](/C:/visual%20projects/ym/turso/bootstrap_schema.sql)
+- [turso_runtime.py](/C:/visual%20projects/ym/scripts/turso_runtime.py)
+- [bootstrap_turso.py](/C:/visual%20projects/ym/scripts/bootstrap_turso.py)
+
+Назначение:
+
+- `bootstrap_schema.sql`:
+  - Turso/libSQL-compatible DDL bootstrap;
+- `turso_runtime.py`:
+  - читает `TURSO_DATABASE_URL` и `TURSO_AUTH_TOKEN`;
+  - открывает local replica;
+  - сразу делает `sync()`, чтобы Python работал не против пустого локального snapshot, а против актуального remote state;
+- `bootstrap_turso.py`:
+  - применяет bootstrap schema;
+  - делает `commit + sync` после DDL.
+
+Нужные env:
+
+- `TURSO_DATABASE_URL`
+- `TURSO_AUTH_TOKEN`
+- optional `TURSO_LOCAL_REPLICA_PATH`
+
+Пример:
+
+```powershell
+$env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
+$env:TURSO_AUTH_TOKEN='<db-token>'
+python scripts\bootstrap_turso.py
 ```
 
 ## Verification
