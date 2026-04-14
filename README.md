@@ -133,6 +133,15 @@ $env:TURSO_AUTH_TOKEN='<db-token>'
 python scripts\bootstrap_turso.py
 ```
 
+Python ingest service:
+
+```powershell
+$env:INGEST_TOKEN='<ingest-token>'
+$env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
+$env:TURSO_AUTH_TOKEN='<db-token>'
+uvicorn ingest_service.main:app --host 0.0.0.0 --port 8000
+```
+
 `run_pipeline.py` now prints phase logs and timings during execution:
 
 - `pipeline_started`
@@ -242,6 +251,13 @@ or
 
 Turso bootstrap environment:
 
+- `TURSO_DATABASE_URL`
+- `TURSO_AUTH_TOKEN`
+- optional `TURSO_LOCAL_REPLICA_PATH`
+
+Python ingest service environment:
+
+- `INGEST_TOKEN`
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN`
 - optional `TURSO_LOCAL_REPLICA_PATH`

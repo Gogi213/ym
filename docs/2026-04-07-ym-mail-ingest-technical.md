@@ -645,6 +645,27 @@ python scripts\bootstrap_turso.py
 - cutover Apps Script на новый endpoint;
 - перенос normalizer/sheet sync на Turso backend.
 
+### Python ingest runtime wiring
+
+Уже реализовано:
+
+- [ingest_service/runtime.py](/C:/visual%20projects/ym/ingest_service/runtime.py)
+- [ingest_service/main.py](/C:/visual%20projects/ym/ingest_service/main.py)
+
+Что покрыто:
+
+- env-driven `INGEST_TOKEN` loading;
+- создание app из реального Turso connection;
+- lifecycle shutdown с `connection.close()`;
+- единая ASGI entrypoint:
+  - `uvicorn ingest_service.main:app --host 0.0.0.0 --port 8000`
+
+Что ещё не закрыто:
+
+- production deployment target;
+- cutover Apps Script на этот endpoint;
+- живой ingest smoke уже не на in-memory bootstrap, а на реальную Turso migration DB.
+
 ## Verification
 
 Минимальные проверки:

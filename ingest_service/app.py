@@ -25,6 +25,12 @@ def _unauthorized_response() -> JSONResponse:
     return JSONResponse(status_code=401, content={"ok": False, "error": "Unauthorized"})
 
 
+def _error_response(error: Exception) -> JSONResponse:
+    if isinstance(error, ValueError):
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(error)})
+    return JSONResponse(status_code=500, content={"ok": False, "error": str(error)})
+
+
 def create_app(
     ingest_token: str,
     reset_handler: ResetHandler | None = None,
@@ -44,7 +50,10 @@ def create_app(
     def reset(payload: ResetPayload, x_ingest_token: str | None = Header(default=None)) -> Any:
         if not is_authorized(settings.ingest_token, x_ingest_token):
             return _unauthorized_response()
-        return resolved_reset_handler(payload)
+        try:
+            return resolved_reset_handler(payload)
+        except Exception as error:
+            return _error_response(error)
 
     @app.post("/ingest")
     async def ingest(
@@ -63,6 +72,9 @@ def create_app(
             parsed_meta = json.loads(meta)
         except json.JSONDecodeError:
             return JSONResponse(status_code=400, content={"ok": False, "error": "Invalid meta JSON"})
-        return resolved_ingest_handler(parsed_meta, file)
+        try:
+            return resolved_ingest_handler(parsed_meta, file)
+        except Exception as error:
+            return _error_response(error)
 
     return app
