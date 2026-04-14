@@ -597,9 +597,29 @@ python scripts\bootstrap_turso.py
 Что ещё не перенесено в этот слой:
 
 - parsing `csv/xlsx`
-- raw writes в Turso
+- route-to-storage integration
 - обновление `pipeline_runs`
 - production startup/deploy
+
+### Turso raw storage adapter
+
+Уже реализовано:
+
+- [ingest_service/storage.py](/C:/visual%20projects/ym/ingest_service/storage.py)
+
+Что покрывает:
+
+- `mark_pipeline_run_after_reset`
+- `insert_file_record`
+- `insert_row_records`
+- `insert_file_payload_record`
+- `refresh_pipeline_run_after_ingest`
+
+Текущее назначение:
+
+- это Turso/libSQL-compatible write-path для raw ingest;
+- тестируется на SQLite-compatible bootstrap schema;
+- станет storage backbone для нового Python ingest service после route integration и parsing port.
 
 ## Verification
 
