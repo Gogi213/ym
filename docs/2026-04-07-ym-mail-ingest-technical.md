@@ -725,6 +725,8 @@ python scripts\bootstrap_turso.py
 - живой ingest smoke уже не на in-memory bootstrap, а на реальную Turso migration DB.
 - generic container deployment artifact есть в репе:
   - [Dockerfile.ingest-service](/C:/visual%20projects/ym/Dockerfile.ingest-service)
+  - [docker-compose.ingest-service.yml](/C:/visual%20projects/ym/docker-compose.ingest-service.yml)
+  - [.env.ingest-service.example](/C:/visual%20projects/ym/.env.ingest-service.example)
   - это не выбор хостинга, а только transport/runtime scaffold
 
 ### Live Turso smoke status

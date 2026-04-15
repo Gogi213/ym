@@ -20,6 +20,8 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 - [turso/bootstrap_schema.sql](./turso/bootstrap_schema.sql): Turso/libSQL bootstrap DDL
 - [ingest_service](./ingest_service): new Python HTTP ingest service scaffold for Turso cutover
 - [Dockerfile.ingest-service](./Dockerfile.ingest-service): generic container runtime for the new Python ingest service
+- [docker-compose.ingest-service.yml](./docker-compose.ingest-service.yml): local/prod-like compose scaffold for the ingest service
+- [.env.ingest-service.example](./.env.ingest-service.example): required env template for the ingest service container
 - [docs](./docs): business, technical, and deployment notes
 
 ## Current Storage State
@@ -158,6 +160,13 @@ docker run --rm -p 8000:8000 `
   -e TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io' `
   -e TURSO_AUTH_TOKEN='<db-token>' `
   ym-ingest-service
+```
+
+Compose-based ingest service:
+
+```powershell
+Copy-Item .env.ingest-service.example .env.ingest-service
+docker compose -f docker-compose.ingest-service.yml up --build
 ```
 
 Turso-backed normalizer smoke:
