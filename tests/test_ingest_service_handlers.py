@@ -159,6 +159,40 @@ class IngestServiceHandlersTests(unittest.TestCase):
         self.assertEqual(pipeline["raw_rows"], 0)
         self.assertEqual(pipeline["normalize_status"], "pending_normalize")
 
+    def test_pipeline_run_handler_returns_run_state(self):
+        from ingest_service.handlers import create_runtime_handlers
+
+        connection = build_connection()
+        handlers = create_runtime_handlers(connection)
+
+        connection.execute(
+            """
+            insert into pipeline_runs (
+              run_date, raw_revision, normalize_status, raw_files, raw_rows,
+              normalized_files, normalized_rows, last_ingest_at, normalized_at,
+              last_error, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("2026-04-14", 3, "pending_normalize", 4, 120, 0, 0, "2026-04-14T09:00:00Z", None, None, "2026-04-14T09:00:00Z"),
+        )
+        connection.commit()
+
+        self.assertEqual(
+            handlers.pipeline_run_handler("2026-04-14"),
+            {
+                "ok": True,
+                "run_date": "2026-04-14",
+                "exists": True,
+                "normalize_status": "pending_normalize",
+                "raw_files": 4,
+                "raw_rows": 120,
+                "normalized_files": 0,
+                "normalized_rows": 0,
+                "raw_revision": 3,
+                "last_error": None,
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

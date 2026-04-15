@@ -25,6 +25,7 @@ def create_runtime_app() -> FastAPI:
         ingest_token=ingest_token,
         reset_handler=handlers.reset_handler,
         ingest_handler=handlers.ingest_handler,
+        pipeline_run_handler=handlers.pipeline_run_handler,
     )
 
     @asynccontextmanager

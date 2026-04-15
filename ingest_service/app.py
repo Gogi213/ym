@@ -7,10 +7,11 @@ from fastapi import FastAPI, File, Form, Header, UploadFile
 from fastapi.responses import JSONResponse
 
 from ingest_service.auth import is_authorized
-from ingest_service.models import IngestSettings, ResetPayload
+from ingest_service.models import IngestSettings, PipelineRunStatus, ResetPayload
 
 ResetHandler = Callable[[ResetPayload], dict[str, Any]]
 IngestHandler = Callable[[dict[str, Any], UploadFile], dict[str, Any]]
+PipelineRunHandler = Callable[[str], dict[str, Any]]
 
 
 def _default_reset_handler(payload: ResetPayload) -> dict[str, Any]:
@@ -19,6 +20,10 @@ def _default_reset_handler(payload: ResetPayload) -> dict[str, Any]:
 
 def _default_ingest_handler(meta: dict[str, Any], _upload: UploadFile) -> dict[str, Any]:
     return {"ok": True, "status": "accepted", "rows": 0}
+
+
+def _default_pipeline_run_handler(run_date: str) -> dict[str, Any]:
+    return {"ok": True, "run_date": run_date, "exists": False}
 
 
 def _unauthorized_response() -> JSONResponse:
@@ -35,16 +40,27 @@ def create_app(
     ingest_token: str,
     reset_handler: ResetHandler | None = None,
     ingest_handler: IngestHandler | None = None,
+    pipeline_run_handler: PipelineRunHandler | None = None,
 ) -> FastAPI:
     settings = IngestSettings(ingest_token=ingest_token)
     resolved_reset_handler = reset_handler or _default_reset_handler
     resolved_ingest_handler = ingest_handler or _default_ingest_handler
+    resolved_pipeline_run_handler = pipeline_run_handler or _default_pipeline_run_handler
 
     app = FastAPI(title="YM Turso Ingest Service")
 
     @app.get("/health")
     def health() -> dict[str, bool]:
         return {"ok": True}
+
+    @app.get("/pipeline-runs/{run_date}")
+    def pipeline_run_status(run_date: str, x_ingest_token: str | None = Header(default=None)) -> Any:
+        if not is_authorized(settings.ingest_token, x_ingest_token):
+            return _unauthorized_response()
+        try:
+            return resolved_pipeline_run_handler(PipelineRunStatus(run_date=run_date).run_date)
+        except Exception as error:
+            return _error_response(error)
 
     @app.post("/reset")
     def reset(payload: ResetPayload, x_ingest_token: str | None = Header(default=None)) -> Any:

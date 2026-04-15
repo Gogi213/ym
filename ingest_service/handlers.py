@@ -4,9 +4,10 @@ from dataclasses import dataclass
 
 from fastapi import UploadFile
 
-from ingest_service.models import ResetPayload
+from ingest_service.models import PipelineRunStatus, ResetPayload
 from ingest_service.parse import parse_attachment
 from ingest_service.storage import (
+    fetch_pipeline_run_status,
     insert_file_payload_record,
     insert_file_record,
     insert_row_records,
@@ -19,6 +20,7 @@ from ingest_service.storage import (
 class RuntimeHandlers:
     reset_handler: object
     ingest_handler: object
+    pipeline_run_handler: object
 
 
 def normalize_attachment_type(meta_type: object, filename: str, content_type: str) -> str | None:
@@ -107,4 +109,12 @@ def create_runtime_handlers(connection) -> RuntimeHandlers:
             },
         }
 
-    return RuntimeHandlers(reset_handler=reset_handler, ingest_handler=ingest_handler)
+    def pipeline_run_handler(run_date: str | PipelineRunStatus):
+        resolved_run_date = run_date.run_date if isinstance(run_date, PipelineRunStatus) else str(run_date)
+        return fetch_pipeline_run_status(connection, resolved_run_date)
+
+    return RuntimeHandlers(
+        reset_handler=reset_handler,
+        ingest_handler=ingest_handler,
+        pipeline_run_handler=pipeline_run_handler,
+    )

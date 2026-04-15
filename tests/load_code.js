@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const EXPORT_NAMES = [
   'buildAttachmentMetadata_',
   'buildAttachmentRequest_',
+  'buildIngestStatusRequest_',
   'buildRunContext_',
   'buildResetPayload_',
   'buildSupabaseSelectRequest_',

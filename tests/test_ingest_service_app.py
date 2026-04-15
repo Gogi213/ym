@@ -15,6 +15,35 @@ class IngestServiceAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"ok": True})
 
+    def test_pipeline_run_status_requires_ingest_token(self):
+        from ingest_service.app import create_app
+
+        client = TestClient(create_app(ingest_token="secret"))
+        response = client.get("/pipeline-runs/2026-04-14")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {"ok": False, "error": "Unauthorized"})
+
+    def test_pipeline_run_status_calls_injected_handler(self):
+        from ingest_service.app import create_app
+
+        def pipeline_run_handler(run_date):
+            return {"ok": True, "run_date": run_date, "exists": True}
+
+        client = TestClient(
+            create_app(
+                ingest_token="secret",
+                pipeline_run_handler=pipeline_run_handler,
+            )
+        )
+        response = client.get(
+            "/pipeline-runs/2026-04-14",
+            headers={"x-ingest-token": "secret"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True, "run_date": "2026-04-14", "exists": True})
+
     def test_reset_requires_ingest_token(self):
         from ingest_service.app import create_app
 

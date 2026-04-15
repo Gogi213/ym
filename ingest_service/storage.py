@@ -223,3 +223,38 @@ def refresh_pipeline_run_after_ingest(connection, run_date: str) -> None:
         ),
     )
     _commit_and_sync(connection)
+
+
+def fetch_pipeline_run_status(connection, run_date: str) -> dict[str, object]:
+    cursor = connection.execute(
+        """
+        select
+          run_date,
+          raw_revision,
+          normalize_status,
+          raw_files,
+          raw_rows,
+          normalized_files,
+          normalized_rows,
+          last_error
+        from pipeline_runs
+        where run_date = ?
+        """,
+        (run_date,),
+    )
+    row, columns = _fetchone_with_columns(cursor)
+    if row is None:
+        return {"ok": True, "run_date": run_date, "exists": False}
+
+    return {
+        "ok": True,
+        "run_date": str(_row_value(row, columns, "run_date") or run_date),
+        "exists": True,
+        "normalize_status": _row_value(row, columns, "normalize_status"),
+        "raw_files": int(_row_value(row, columns, "raw_files", 0) or 0),
+        "raw_rows": int(_row_value(row, columns, "raw_rows", 0) or 0),
+        "normalized_files": int(_row_value(row, columns, "normalized_files", 0) or 0),
+        "normalized_rows": int(_row_value(row, columns, "normalized_rows", 0) or 0),
+        "raw_revision": int(_row_value(row, columns, "raw_revision", 0) or 0),
+        "last_error": _row_value(row, columns, "last_error"),
+    }

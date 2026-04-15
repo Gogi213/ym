@@ -59,6 +59,15 @@ class SyncTrackingConnection:
 
 
 class IngestServiceStorageTests(unittest.TestCase):
+    def test_fetch_pipeline_run_status_returns_exists_false_for_missing_day(self):
+        from ingest_service.storage import fetch_pipeline_run_status
+
+        connection = build_sqlite_connection()
+        self.assertEqual(
+            fetch_pipeline_run_status(connection, "2026-04-14"),
+            {"ok": True, "run_date": "2026-04-14", "exists": False},
+        )
+
     def test_storage_helpers_support_tuple_rows_with_cursor_description(self):
         from ingest_service.storage import (
             insert_file_record,
@@ -227,6 +236,7 @@ class IngestServiceStorageTests(unittest.TestCase):
 
     def test_insert_row_records_and_refresh_pipeline_run_after_ingest(self):
         from ingest_service.storage import (
+            fetch_pipeline_run_status,
             insert_file_record,
             insert_row_records,
             mark_pipeline_run_after_reset,
@@ -281,6 +291,21 @@ class IngestServiceStorageTests(unittest.TestCase):
         self.assertEqual(pipeline["raw_files"], 1)
         self.assertEqual(pipeline["raw_rows"], 2)
         self.assertEqual(pipeline["normalize_status"], "pending_normalize")
+        self.assertEqual(
+            fetch_pipeline_run_status(connection, "2026-04-14"),
+            {
+                "ok": True,
+                "run_date": "2026-04-14",
+                "exists": True,
+                "normalize_status": "pending_normalize",
+                "raw_files": 1,
+                "raw_rows": 2,
+                "normalized_files": 0,
+                "normalized_rows": 0,
+                "raw_revision": 1,
+                "last_error": None,
+            },
+        )
 
 
 if __name__ == "__main__":

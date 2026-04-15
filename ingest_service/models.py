@@ -13,3 +13,8 @@ class ResetPayload(BaseModel):
 @dataclass(frozen=True)
 class IngestSettings:
     ingest_token: str
+
+
+@dataclass(frozen=True)
+class PipelineRunStatus:
+    run_date: str

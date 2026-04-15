@@ -3,6 +3,9 @@ const CONFIG_ = {
   sourceSheetName: 'отчеты',
   sourceColumn: 1,
   sourceSecondaryColumn: 2,
+  ingestBaseUrlProperty: 'INGEST_BASE_URL',
+  ingestTokenProperty: 'INGEST_TOKEN',
+  ingestStatusUrlProperty: 'INGEST_STATUS_URL',
   supabaseFunctionUrlProperty: 'SUPABASE_FUNCTION_URL',
   supabaseIngestTokenProperty: 'SUPABASE_INGEST_TOKEN',
   supabaseRestUrlProperty: 'SUPABASE_REST_URL',
@@ -405,6 +408,17 @@ function buildSupabaseSelectRequest_(settings, relationName, queryString) {
   };
 }
 
+function buildIngestStatusRequest_(settings, runDate) {
+  return {
+    url: String(settings.statusUrl || '').replace(/\/+$/, '') + '/' + encodeURIComponent(String(runDate || '')),
+    method: 'get',
+    headers: {
+      'x-ingest-token': settings.ingestToken
+    },
+    muteHttpExceptions: true
+  };
+}
+
 function chunkItems_(items, chunkSize) {
   const chunks = [];
   const size = Math.max(1, Number(chunkSize || 1));
@@ -449,63 +463,103 @@ function resolveSettingValue_(propertyValue, fallbackValue, propertyName) {
 
 function getScriptSettings_(propertiesService) {
   const scriptProperties = propertiesService.getScriptProperties();
-  const functionUrl = resolveSettingValue_(
-    scriptProperties.getProperty(CONFIG_.supabaseFunctionUrlProperty),
-    CONFIG_.supabaseFunctionUrl,
-    CONFIG_.supabaseFunctionUrlProperty
-  );
+  const ingestBaseUrl = String(scriptProperties.getProperty(CONFIG_.ingestBaseUrlProperty) || '').trim();
+  const functionUrl = ingestBaseUrl
+    ? ingestBaseUrl.replace(/\/+$/, '') + '/ingest'
+    : resolveSettingValue_(
+        scriptProperties.getProperty(CONFIG_.supabaseFunctionUrlProperty),
+        CONFIG_.supabaseFunctionUrl,
+        CONFIG_.supabaseFunctionUrlProperty
+      );
+  const resetUrl = ingestBaseUrl
+    ? ingestBaseUrl.replace(/\/+$/, '') + '/reset'
+    : functionUrl;
   const ingestToken = resolveSettingValue_(
+    scriptProperties.getProperty(CONFIG_.ingestTokenProperty),
     scriptProperties.getProperty(CONFIG_.supabaseIngestTokenProperty),
-    '',
-    CONFIG_.supabaseIngestTokenProperty
+    CONFIG_.ingestTokenProperty
   );
 
-  return { functionUrl, ingestToken };
-}
-
-function buildRunContext_(runtime) {
-  const timeZone = runtime.Session.getScriptTimeZone();
-  const spreadsheet = runtime.SpreadsheetApp.openById(CONFIG_.sourceSpreadsheetId);
-  const topicRules = loadTopicRulesFromSpreadsheet_(spreadsheet);
-  const settings = getScriptSettings_(runtime.PropertiesService);
-  const scriptProperties = runtime.PropertiesService.getScriptProperties();
-  const verboseLogging = /^(1|true|yes|on)$/i.test(
-    String(scriptProperties.getProperty(CONFIG_.verboseLoggingProperty) || '').trim()
-  );
-
-  if (!topicRules.length) {
-    throw new Error('No topic rules found in sheet "' + CONFIG_.sourceSheetName + '"');
-  }
-
-  return {
-    settings,
-    timeZone,
-    topicRules,
-    verboseLogging
-  };
+  return { functionUrl, resetUrl, ingestToken };
 }
 
 function getBackfillSettings_(propertiesService) {
   const scriptProperties = propertiesService.getScriptProperties();
-  const functionUrl = resolveSettingValue_(
-    scriptProperties.getProperty(CONFIG_.supabaseFunctionUrlProperty),
-    CONFIG_.supabaseFunctionUrl,
-    CONFIG_.supabaseFunctionUrlProperty
-  );
-  const restUrl = resolveSettingValue_(
-    scriptProperties.getProperty(CONFIG_.supabaseRestUrlProperty),
-    functionUrl.replace(/\/functions\/v1\/[^/]+$/, '/rest/v1'),
-    CONFIG_.supabaseRestUrlProperty
-  );
+  const ingestBaseUrl = String(scriptProperties.getProperty(CONFIG_.ingestBaseUrlProperty) || '').trim();
+  const ingestStatusUrl = String(scriptProperties.getProperty(CONFIG_.ingestStatusUrlProperty) || '').trim();
+  const functionUrl = ingestBaseUrl
+    ? ingestBaseUrl.replace(/\/+$/, '') + '/ingest'
+    : resolveSettingValue_(
+        scriptProperties.getProperty(CONFIG_.supabaseFunctionUrlProperty),
+        CONFIG_.supabaseFunctionUrl,
+        CONFIG_.supabaseFunctionUrlProperty
+      );
+  const restUrl = ingestBaseUrl
+    ? ''
+    : resolveSettingValue_(
+        scriptProperties.getProperty(CONFIG_.supabaseRestUrlProperty),
+        functionUrl.replace(/\/functions\/v1\/[^/]+$/, '/rest/v1'),
+        CONFIG_.supabaseRestUrlProperty
+      );
   const serviceRoleKey = String(
     scriptProperties.getProperty(CONFIG_.supabaseServiceRoleKeyProperty) || ''
   ).trim();
+  const ingestToken = String(
+    scriptProperties.getProperty(CONFIG_.ingestTokenProperty)
+      || scriptProperties.getProperty(CONFIG_.supabaseIngestTokenProperty)
+      || ''
+  ).trim();
+  const statusUrl = ingestStatusUrl
+    ? ingestStatusUrl.replace(/\/+$/, '')
+    : (ingestBaseUrl ? ingestBaseUrl.replace(/\/+$/, '') + '/pipeline-runs' : '');
 
   return {
+    statusUrl,
+    ingestToken,
     restUrl,
     serviceRoleKey,
-    skipExistingEnabled: Boolean(serviceRoleKey)
+    skipExistingEnabled: Boolean(statusUrl || serviceRoleKey)
   };
+}
+
+function postReset_(urlFetchApp, settings, runDate) {
+  return assertSuccessfulResponse_(
+    urlFetchApp.fetch(settings.resetUrl, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: {
+        'x-ingest-token': settings.ingestToken
+      },
+      muteHttpExceptions: true,
+      payload: JSON.stringify(buildResetPayload_(runDate))
+    }),
+    'Reset request'
+  );
+}
+
+function fetchRunDateExists_(urlFetchApp, settings, runDate) {
+  if (settings.statusUrl) {
+    const response = assertSuccessfulResponse_(
+      urlFetchApp.fetch(
+        buildIngestStatusRequest_(settings, runDate)
+      ),
+      'Run date existence check'
+    );
+    return Boolean(response.json && response.json.exists);
+  }
+
+  const response = assertSuccessfulResponse_(
+    urlFetchApp.fetch(
+      buildSupabaseSelectRequest_(
+        settings,
+        'ingest_files',
+        buildRunDateExistsQuery_(runDate)
+      )
+    ),
+    'Run date existence check'
+  );
+
+  return Array.isArray(response.json) && response.json.length > 0;
 }
 
 function parseJsonResponse_(response) {
@@ -531,21 +585,6 @@ function assertSuccessfulResponse_(response, actionLabel) {
 
   throw new Error(
     actionLabel + ' failed with HTTP ' + parsed.responseCode + ': ' + parsed.body
-  );
-}
-
-function postReset_(urlFetchApp, settings, runDate) {
-  return assertSuccessfulResponse_(
-    urlFetchApp.fetch(settings.functionUrl, {
-      method: 'post',
-      contentType: 'application/json',
-      headers: {
-        'x-ingest-token': settings.ingestToken
-      },
-      muteHttpExceptions: true,
-      payload: JSON.stringify(buildResetPayload_(runDate))
-    }),
-    'Reset request'
   );
 }
 
@@ -585,19 +624,26 @@ function getAppsScriptRuntime_() {
   };
 }
 
-function fetchRunDateExists_(urlFetchApp, settings, runDate) {
-  const response = assertSuccessfulResponse_(
-    urlFetchApp.fetch(
-      buildSupabaseSelectRequest_(
-        settings,
-        'ingest_files',
-        buildRunDateExistsQuery_(runDate)
-      )
-    ),
-    'Run date existence check'
+function buildRunContext_(runtime) {
+  const timeZone = runtime.Session.getScriptTimeZone();
+  const spreadsheet = runtime.SpreadsheetApp.openById(CONFIG_.sourceSpreadsheetId);
+  const topicRules = loadTopicRulesFromSpreadsheet_(spreadsheet);
+  const settings = getScriptSettings_(runtime.PropertiesService);
+  const scriptProperties = runtime.PropertiesService.getScriptProperties();
+  const verboseLogging = /^(1|true|yes|on)$/i.test(
+    String(scriptProperties.getProperty(CONFIG_.verboseLoggingProperty) || '').trim()
   );
 
-  return Array.isArray(response.json) && response.json.length > 0;
+  if (!topicRules.length) {
+    throw new Error('No topic rules found in sheet "' + CONFIG_.sourceSheetName + '"');
+  }
+
+  return {
+    settings,
+    timeZone,
+    topicRules,
+    verboseLogging
+  };
 }
 
 

@@ -473,6 +473,20 @@ test('buildSupabaseSelectRequest_ shapes REST request for Supabase REST read', (
   assert.equal(request.headers.Authorization, 'Bearer secret-key');
 });
 
+test('buildIngestStatusRequest_ shapes generic ingest status request', () => {
+  const request = ingest.buildIngestStatusRequest_(
+    {
+      statusUrl: 'https://example.com/api/pipeline-runs',
+      ingestToken: 'secret-token'
+    },
+    '2026-04-14'
+  );
+
+  assert.equal(request.url, 'https://example.com/api/pipeline-runs/2026-04-14');
+  assert.equal(request.method, 'get');
+  assert.equal(request.headers['x-ingest-token'], 'secret-token');
+});
+
 test('buildRunContext_ loads timezone, topics, and ingest settings once', () => {
   const values = [
     ['Тема письма', 'Конверсии'],
@@ -481,10 +495,10 @@ test('buildRunContext_ loads timezone, topics, and ingest settings once', () => 
   ];
   const scriptProperties = {
     getProperty(name) {
-      if (name === 'SUPABASE_FUNCTION_URL') {
-        return 'https://example.supabase.co/functions/v1/mail-ingest';
+      if (name === 'INGEST_BASE_URL') {
+        return 'https://example.com/ingest-service';
       }
-      if (name === 'SUPABASE_INGEST_TOKEN') {
+      if (name === 'INGEST_TOKEN') {
         return 'secret-token';
       }
       return '';
@@ -555,24 +569,22 @@ test('buildRunContext_ loads timezone, topics, and ingest settings once', () => 
       }
     ],
     settings: {
-      functionUrl: 'https://example.supabase.co/functions/v1/mail-ingest',
+      functionUrl: 'https://example.com/ingest-service/ingest',
+      resetUrl: 'https://example.com/ingest-service/reset',
       ingestToken: 'secret-token'
     },
     verboseLogging: false
   });
 });
 
-test('getBackfillSettings_ degrades gracefully when service role key is absent', () => {
+test('getBackfillSettings_ uses generic ingest status url when ingest base url is configured', () => {
   const scriptProperties = {
     getProperty(name) {
-      if (name === 'SUPABASE_FUNCTION_URL') {
-        return 'https://example.supabase.co/functions/v1/mail-ingest';
+      if (name === 'INGEST_BASE_URL') {
+        return 'https://example.com/ingest-service';
       }
-      if (name === 'SUPABASE_REST_URL') {
-        return '';
-      }
-      if (name === 'SUPABASE_SERVICE_ROLE_KEY') {
-        return '';
+      if (name === 'INGEST_TOKEN') {
+        return 'secret-token';
       }
       return '';
     }
@@ -585,9 +597,11 @@ test('getBackfillSettings_ degrades gracefully when service role key is absent',
       }
     }),
     {
-      restUrl: 'https://example.supabase.co/rest/v1',
+      statusUrl: 'https://example.com/ingest-service/pipeline-runs',
+      ingestToken: 'secret-token',
+      restUrl: '',
       serviceRoleKey: '',
-      skipExistingEnabled: false
+      skipExistingEnabled: true
     }
   );
 });
@@ -613,7 +627,7 @@ test('resolveSettingValue_ prefers script property over fallback', () => {
   );
 });
 
-test('buildRunContext_ requires SUPABASE_INGEST_TOKEN from script properties', () => {
+test('buildRunContext_ requires INGEST_TOKEN from script properties', () => {
   const runtime = {
     Session: {
       getScriptTimeZone() {
@@ -644,9 +658,6 @@ test('buildRunContext_ requires SUPABASE_INGEST_TOKEN from script properties', (
       getScriptProperties() {
         return {
           getProperty(name) {
-            if (name === 'SUPABASE_FUNCTION_URL') {
-              return 'https://example.supabase.co/functions/v1/mail-ingest';
-            }
             return '';
           }
         };
@@ -656,6 +667,6 @@ test('buildRunContext_ requires SUPABASE_INGEST_TOKEN from script properties', (
 
   assert.throws(
     () => ingest.buildRunContext_(runtime),
-    /Missing script property "SUPABASE_INGEST_TOKEN"/
+    /Missing script property "INGEST_TOKEN"/
   );
 });

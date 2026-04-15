@@ -23,7 +23,7 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 
 ## Current Storage State
 
-Current production runtime still uses Supabase for live traffic, but the Turso migration already covers more than bootstrap.
+Current production runtime is in cutover state: Apps Script can already target the new Python ingest service, and the normalizer/sync stack can already run on Turso via backend/env selection.
 
 Turso migration work has started:
 
@@ -41,18 +41,17 @@ Turso migration work has started:
 
 What is not cut over yet:
 
-- Apps Script still uploads to Supabase
-- production env is not cut over to Turso by default
-- Apps Script still points to Supabase, not the new Python service
-- `run_pipeline.py` still runs against Supabase unless Turso env/backend is explicitly set
+- production env is not switched to Turso by default
+- the default operational runtime still assumes existing Supabase credentials unless new ingest/Turso env is provided
+- final deployment target for the Python ingest service is not chosen in repo docs yet
 
 ## Runtime Shape
 
 1. Apps Script reads topic bindings from spreadsheet `17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA`, sheet `отчеты`:
    - column `A` = primary topic
    - column `B` = optional secondary topic with conversions
-2. Apps Script finds matching Gmail messages and uploads `xlsx/csv` attachments to the current ingest endpoint.
-3. Current production ingest path:
+2. Apps Script finds matching Gmail messages and uploads `xlsx/csv` attachments to the configured ingest endpoint.
+3. Legacy ingest path:
    - Supabase Edge Function stores raw files and extracted raw rows.
    - package boundaries:
      - `auth.ts`: token auth
@@ -60,8 +59,12 @@ What is not cut over yet:
      - `parse.ts`: `csv/xlsx` table detection and parsing
      - `shared.ts`: shared types and HTTP helpers
      - `supabase.ts`: raw writes and `pipeline_runs` updates
-4. Migration ingest path:
+4. New ingest path:
    - Python FastAPI ingest service writes the same raw layer into Turso/libSQL.
+   - exposes:
+     - `POST /reset`
+     - `POST /ingest`
+     - `GET /pipeline-runs/{run_date}`
 5. Python normalizer builds canonical fact tables and `export_rows_wide`.
    - secondary topics do not become standalone operator topics
    - they are attached to their `primary_topic` only when the exact grain matches
@@ -247,10 +250,15 @@ python scripts\normalize_supabase.py --run-date 2026-04-11
 
 Apps Script properties:
 
-- `SUPABASE_FUNCTION_URL`
-- `SUPABASE_INGEST_TOKEN`
-- optional `SUPABASE_REST_URL`
-- required for `runMonthBackfill()`: `SUPABASE_SERVICE_ROLE_KEY`
+- preferred for the new Python ingest service:
+  - `INGEST_BASE_URL`
+  - `INGEST_TOKEN`
+  - optional `INGEST_STATUS_URL`
+- legacy Supabase fallback:
+  - `SUPABASE_FUNCTION_URL`
+  - `SUPABASE_INGEST_TOKEN`
+  - optional `SUPABASE_REST_URL`
+  - required for `runMonthBackfill()` on legacy Supabase status checks: `SUPABASE_SERVICE_ROLE_KEY`
 - optional debug switch: `VERBOSE_LOGGING=true`
 
 Python environment:
@@ -284,7 +292,9 @@ Google Sheets sync:
 Apps Script:
 
 - `run()`: daily ingest for a single target date
-- `runMonthBackfill()`: backfill from month start to today, skipping dates already present in `public.ingest_files`
+- `runMonthBackfill()`: backfill from month start to today, skipping dates already present in ingest status
+  - if `INGEST_STATUS_URL` or `INGEST_BASE_URL` is configured, it uses `GET /pipeline-runs/{run_date}`
+  - otherwise it falls back to legacy Supabase REST checks against `ingest_files`
 
 Python:
 

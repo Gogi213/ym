@@ -4,8 +4,9 @@
 
 Текущий production-контур больше не использует Google Drive staging.
 
-Параллельно идёт полный переезд storage/runtime слоя с Supabase/Postgres на Turso/libSQL.
-На текущий момент Turso bootstrap, raw ingest, normalizer backend и operator read-path уже проверены живым smoke, но production traffic ещё не cut over.
+Идёт полный переезд storage/runtime слоя с Supabase/Postgres на Turso/libSQL.
+На текущий момент Turso bootstrap, raw ingest, normalizer backend и operator read-path уже проверены живым smoke.
+Apps Script transport уже умеет работать не только с Supabase Function, но и с новым Python ingest service.
 
 Рабочая цепочка сейчас такая:
 
@@ -56,17 +57,29 @@
 - искать письма в ящике `ya-stats@solta.io`;
 - матчить письма по теме внутри тела заголовка;
 - брать `xlsx/csv` вложения;
-- слать вложения и метаданные в Supabase Function;
+- слать вложения и метаданные в configured ingest endpoint;
 - не делать бизнес-нормализацию.
 
 Важно:
 
 - текущий код работает с `runDayOffset = -1`, то есть по умолчанию грузит вчерашнюю дату по часовому поясу скрипта;
-- dedup и классификация файла происходят уже после Apps Script.
+- dedup и классификация файла происходят уже после Apps Script;
 - Apps Script отправляет в ingest метаданные:
   - `matched_topic`
   - `primary_topic`
   - `topic_role = primary | secondary`
+- transport settings теперь двухрежимные:
+  - preferred:
+    - `INGEST_BASE_URL`
+    - `INGEST_TOKEN`
+    - optional `INGEST_STATUS_URL`
+  - legacy fallback:
+    - `SUPABASE_FUNCTION_URL`
+    - `SUPABASE_INGEST_TOKEN`
+    - optional `SUPABASE_REST_URL`
+    - optional `SUPABASE_SERVICE_ROLE_KEY`
+- для `runMonthBackfill()` при новом transport Apps Script проверяет уже не Supabase REST, а:
+  - `GET /pipeline-runs/{run_date}`
 
 Структура исходников:
 
@@ -619,6 +632,7 @@ python scripts\bootstrap_turso.py
 - `GET /health`
 - `POST /reset`
 - `POST /ingest`
+- `GET /pipeline-runs/{run_date}`
 - auth по `x-ingest-token`
 - route-level contract, совместимый по форме с текущим Apps Script transport
 - `csv/xlsx` parsing port в Python
@@ -687,11 +701,19 @@ python scripts\bootstrap_turso.py
 - lifecycle shutdown с `connection.close()`;
 - единая ASGI entrypoint:
   - `uvicorn ingest_service.main:app --host 0.0.0.0 --port 8000`
+- status endpoint для Apps Script backfill:
+  - `GET /pipeline-runs/{run_date}`
+  - ответ:
+    - `run_date`
+    - `exists`
+    - `raw_files`
+    - `raw_rows`
+    - `normalize_status`
 
 Что ещё не закрыто:
 
 - production deployment target;
-- cutover Apps Script на этот endpoint;
+- Apps Script production cutover как operational default;
 - живой ingest smoke уже не на in-memory bootstrap, а на реальную Turso migration DB.
 
 ### Live Turso smoke status
