@@ -19,6 +19,7 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 - [scripts/bootstrap_turso.py](./scripts/bootstrap_turso.py): apply Turso-compatible schema bootstrap
 - [turso/bootstrap_schema.sql](./turso/bootstrap_schema.sql): Turso/libSQL bootstrap DDL
 - [ingest_service](./ingest_service): new Python HTTP ingest service scaffold for Turso cutover
+- [Dockerfile.ingest-service](./Dockerfile.ingest-service): generic container runtime for the new Python ingest service
 - [docs](./docs): business, technical, and deployment notes
 
 ## Current Storage State
@@ -44,7 +45,7 @@ What is not cut over yet:
 
 - production env is not switched to Turso by default
 - the default operational runtime still assumes existing Supabase credentials unless new ingest/Turso env is provided
-- final deployment target for the Python ingest service is not chosen in repo docs yet
+- final deployment target for the Python ingest service is not chosen in repo docs yet, but a generic container artifact already exists
 
 ## Runtime Shape
 
@@ -146,6 +147,17 @@ $env:INGEST_TOKEN='<ingest-token>'
 $env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
 $env:TURSO_AUTH_TOKEN='<db-token>'
 uvicorn ingest_service.main:app --host 0.0.0.0 --port 8000
+```
+
+Containerized ingest service:
+
+```powershell
+docker build -f Dockerfile.ingest-service -t ym-ingest-service .
+docker run --rm -p 8000:8000 `
+  -e INGEST_TOKEN='<ingest-token>' `
+  -e TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io' `
+  -e TURSO_AUTH_TOKEN='<db-token>' `
+  ym-ingest-service
 ```
 
 Turso-backed normalizer smoke:

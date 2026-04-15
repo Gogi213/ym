@@ -723,6 +723,9 @@ python scripts\bootstrap_turso.py
 - production deployment target;
 - Apps Script production cutover как operational default;
 - живой ingest smoke уже не на in-memory bootstrap, а на реальную Turso migration DB.
+- generic container deployment artifact есть в репе:
+  - [Dockerfile.ingest-service](/C:/visual%20projects/ym/Dockerfile.ingest-service)
+  - это не выбор хостинга, а только transport/runtime scaffold
 
 ### Live Turso smoke status
 
