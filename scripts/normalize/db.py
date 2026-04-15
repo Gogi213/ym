@@ -19,8 +19,17 @@ def load_connection_string():
     return db_connection.load_connection_string()
 
 
+def _has_turso_env() -> bool:
+    return bool(
+        str(os.getenv("TURSO_DATABASE_URL") or "").strip()
+        and str(os.getenv("TURSO_AUTH_TOKEN") or "").strip()
+    )
+
+
 def _backend_name() -> str:
-    value = str(os.getenv("NORMALIZE_DB_BACKEND") or "postgres").strip().lower()
+    value = str(os.getenv("NORMALIZE_DB_BACKEND") or "").strip().lower()
+    if not value:
+        return "turso" if _has_turso_env() else "postgres"
     return "turso" if value == "turso" else "postgres"
 
 

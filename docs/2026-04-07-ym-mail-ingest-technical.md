@@ -190,7 +190,8 @@ Apps Script transport уже умеет работать не только с Su
   - compatibility facade over operator DB submodules;
 - `db.py`:
   - backend selector facade;
-  - выбирает Postgres или Turso через `NORMALIZE_DB_BACKEND`;
+  - автоматически выбирает Turso, если заданы `TURSO_DATABASE_URL` и `TURSO_AUTH_TOKEN`;
+  - explicit override через `NORMALIZE_DB_BACKEND` остаётся доступным;
 - `pipeline.py`:
   - `normalize_run`;
   - `finalize_normalized_runs`.
@@ -579,6 +580,13 @@ Python normalizer требует один из вариантов подключ
 - `SUPABASE_DB_URL`
 - или `SUPABASE_POOLER_URL` + `SUPABASE_DB_PASSWORD`
 
+Либо Turso env:
+
+- `TURSO_DATABASE_URL`
+- `TURSO_AUTH_TOKEN`
+
+При наличии Turso env normalizer и sync read-path автоматически переключаются на libSQL backend.
+
 Python dependency:
 
 ```powershell
@@ -685,7 +693,7 @@ python scripts\bootstrap_turso.py
 
 - cutover Apps Script на новый endpoint;
 - переключение production env на Turso по умолчанию;
-- переключение `run_pipeline.py` и production sheet sync на Turso env по умолчанию.
+- full operational cutover так, чтобы `run_pipeline.py` и sheet sync всегда работали на Turso env по умолчанию.
 
 ### Python ingest runtime wiring
 
@@ -742,7 +750,7 @@ python scripts\bootstrap_turso.py
 
 Дополнительно на той же migration DB уже подтверждено:
 
-- `NORMALIZE_DB_BACKEND=turso python -m scripts.normalize_supabase --run-date 2026-04-14`
+- `python -m scripts.normalize_supabase --run-date 2026-04-14`
 - чтение:
   - `pipeline_status`
   - `operator_export_rows`
@@ -754,6 +762,7 @@ python scripts\bootstrap_turso.py
 - `pipeline_runs.normalize_status = 'ready'`;
 - `operator_export_rows` содержит агрегированные строки;
 - `goal_mapping_wide` читается через Python sync read-path без `public.*` и Postgres cursor assumptions.
+- при наличии Turso env normalizer сам уходит в libSQL runtime без обязательного `NORMALIZE_DB_BACKEND=turso`.
 
 ## Verification
 

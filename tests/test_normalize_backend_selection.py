@@ -8,8 +8,26 @@ class NormalizeBackendSelectionTests(unittest.TestCase):
         from scripts.normalize import db
 
         fake_connection = object()
-        with mock.patch.dict(os.environ, {}, clear=False):
+        with mock.patch.dict(os.environ, {}, clear=True):
             with mock.patch("scripts.normalize.db.db_connection.connect_db", return_value=fake_connection) as connect_mock:
+                resolved = db.connect_db()
+
+        self.assertIs(resolved, fake_connection)
+        connect_mock.assert_called_once_with()
+
+    def test_connect_db_uses_turso_backend_when_turso_env_is_present(self):
+        from scripts.normalize import db
+
+        fake_connection = object()
+        with mock.patch.dict(
+            os.environ,
+            {
+                "TURSO_DATABASE_URL": "libsql://example.turso.io",
+                "TURSO_AUTH_TOKEN": "secret-token",
+            },
+            clear=True,
+        ):
+            with mock.patch("scripts.normalize.db.turso_connection.connect_db", return_value=fake_connection) as connect_mock:
                 resolved = db.connect_db()
 
         self.assertIs(resolved, fake_connection)
@@ -19,7 +37,7 @@ class NormalizeBackendSelectionTests(unittest.TestCase):
         from scripts.normalize import db
 
         fake_connection = object()
-        with mock.patch.dict(os.environ, {"NORMALIZE_DB_BACKEND": "turso"}, clear=False):
+        with mock.patch.dict(os.environ, {"NORMALIZE_DB_BACKEND": "turso"}, clear=True):
             with mock.patch("scripts.normalize.db.turso_connection.connect_db", return_value=fake_connection) as connect_mock:
                 resolved = db.connect_db()
 
@@ -31,7 +49,14 @@ class NormalizeBackendSelectionTests(unittest.TestCase):
 
         fake_connection = object()
         fake_rows = [{"id": "file-1"}]
-        with mock.patch.dict(os.environ, {"NORMALIZE_DB_BACKEND": "turso"}, clear=False):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "TURSO_DATABASE_URL": "libsql://example.turso.io",
+                "TURSO_AUTH_TOKEN": "secret-token",
+            },
+            clear=True,
+        ):
             with mock.patch("scripts.normalize.db.turso_reads.fetch_ingested_files", return_value=fake_rows) as fetch_mock:
                 resolved = db.fetch_ingested_files(fake_connection, "2026-04-14")
 
@@ -42,7 +67,14 @@ class NormalizeBackendSelectionTests(unittest.TestCase):
         from scripts.normalize import db
 
         fake_connection = object()
-        with mock.patch.dict(os.environ, {"NORMALIZE_DB_BACKEND": "turso"}, clear=False):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "TURSO_DATABASE_URL": "libsql://example.turso.io",
+                "TURSO_AUTH_TOKEN": "secret-token",
+            },
+            clear=True,
+        ):
             with mock.patch("scripts.normalize.db.turso_operator_export.refresh_operator_export_rows_for_run") as refresh_mock:
                 db.refresh_operator_export_rows_for_run(fake_connection, "2026-04-14")
 

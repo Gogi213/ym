@@ -31,7 +31,8 @@ Turso migration work has started:
 - Python runtime can connect to Turso via `libsql`
 - bootstrap can be applied from Python via [bootstrap_turso.py](./scripts/bootstrap_turso.py)
 - Python ingest service exists in [ingest_service](./ingest_service) and already writes raw data to Turso
-- normalizer has backend selection via `NORMALIZE_DB_BACKEND=turso`
+- normalizer auto-detects Turso when `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are present
+- explicit override via `NORMALIZE_DB_BACKEND=turso` is still supported
 - Turso-compatible read/write/operator modules exist under [scripts/normalize](./scripts/normalize)
 - operator read-path for `goal_mapping / union / pipeline_status` already works against Turso-backed tables/views
 - runtime wiring and live smoke against `ym-migration-20260414` are already verified for:
@@ -150,7 +151,6 @@ uvicorn ingest_service.main:app --host 0.0.0.0 --port 8000
 Turso-backed normalizer smoke:
 
 ```powershell
-$env:NORMALIZE_DB_BACKEND='turso'
 $env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
 $env:TURSO_AUTH_TOKEN='<db-token>'
 python -m scripts.normalize_supabase --run-date 2026-04-14
@@ -267,8 +267,9 @@ Python environment:
 or
 - `SUPABASE_POOLER_URL`
 - `SUPABASE_DB_PASSWORD`
-- optional backend switch for the normalizer:
-  - `NORMALIZE_DB_BACKEND=turso`
+- normalizer backend selection:
+  - auto-switches to Turso when both `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are present
+  - optional explicit override: `NORMALIZE_DB_BACKEND=turso`
 
 Turso bootstrap environment:
 
@@ -299,7 +300,8 @@ Apps Script:
 Python:
 
 - `normalize_supabase.py`: rebuild normalized layer for a specific `run_date`
-- the same entrypoint can run on Turso/libSQL when `NORMALIZE_DB_BACKEND=turso` is set
+- the same entrypoint auto-runs on Turso/libSQL when Turso env is present
+- explicit override with `NORMALIZE_DB_BACKEND=turso` is still supported
 - secondary topic rows are merged into primary topic rows only on exact grain:
   - `report_date`
   - `report_date_from`
