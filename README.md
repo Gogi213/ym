@@ -1,10 +1,10 @@
 # YM Ingest Pipeline
 
-Pipeline for ingesting Gmail report attachments into Supabase, normalizing the extracted data, and syncing operator-facing views to Google Sheets.
+Pipeline for ingesting Gmail report attachments from Apps Script into a Python ingest service, storing raw and normalized data in Turso/libSQL, and syncing operator-facing views to Google Sheets.
 
 ## What Lives Here
 
-- [Code.js](./Code.js): Apps Script intake from Gmail to Supabase
+- [Code.js](./Code.js): Apps Script intake from Gmail to the configured ingest endpoint
 - [appsscript-src](./appsscript-src): modular Apps Script source used to generate `Code.js`
 - [supabase/functions/mail-ingest/index.ts](./supabase/functions/mail-ingest/index.ts): thin ingest Edge Function entrypoint
 - [supabase/functions/mail-ingest](./supabase/functions/mail-ingest): split Edge Function modules (`auth / handlers / parse / shared / supabase`)
@@ -26,7 +26,10 @@ Pipeline for ingesting Gmail report attachments into Supabase, normalizing the e
 
 ## Current Storage State
 
-Current production runtime is in cutover state: Apps Script can already target the new Python ingest service, and the normalizer/sync stack can already run on Turso via backend/env selection.
+Current target runtime is:
+
+- `Apps Script -> Python ingest service -> Turso/libSQL -> Python normalize/sync -> Google Sheets`
+- deployment target for the new ingest service: `Northflank`
 
 Turso migration work has started:
 
@@ -46,8 +49,8 @@ Turso migration work has started:
 What is not cut over yet:
 
 - production env is not switched to Turso by default
-- the default operational runtime still assumes existing Supabase credentials unless new ingest/Turso env is provided
-- final deployment target for the Python ingest service is not chosen in repo docs yet, but a generic container artifact already exists
+- Apps Script is not yet pointed at the live Northflank URL
+- the old Supabase runtime still exists in repo as legacy fallback/reference during migration
 
 ## Runtime Shape
 
@@ -69,6 +72,7 @@ What is not cut over yet:
      - `POST /reset`
      - `POST /ingest`
      - `GET /pipeline-runs/{run_date}`
+   - deployment target: `Northflank`
 5. Python normalizer builds canonical fact tables and `export_rows_wide`.
    - secondary topics do not become standalone operator topics
    - they are attached to their `primary_topic` only when the exact grain matches
@@ -168,6 +172,10 @@ Compose-based ingest service:
 Copy-Item .env.ingest-service.example .env.ingest-service
 docker compose -f docker-compose.ingest-service.yml up --build
 ```
+
+Northflank deployment:
+
+- see [docs/2026-04-15-turso-northflank-deploy.md](./docs/2026-04-15-turso-northflank-deploy.md)
 
 Turso-backed normalizer smoke:
 
@@ -350,7 +358,7 @@ Python:
 - `time_on_site_total = visits * avg_time_on_site_seconds`
 - `robot_visits = visits * robot_rate`
 - `goal_1 ... goal_25` are additive in the export and remain topic-specific
-- raw detail remains in Supabase; only the sheet layer is collapsed
+- raw detail remains in the DB; only the sheet layer is collapsed
 
 ## Pipeline Status Sheet
 
@@ -374,5 +382,5 @@ Current statuses:
 
 ## Repository Notes
 
-- `key/`, `node_modules/`, generated CSV exports, and Supabase local temp files are intentionally ignored.
+- `key/`, `node_modules/`, generated CSV exports, local ingest logs, and Supabase local temp files are intentionally ignored.
 - Historical task/spec material is archived under [docs/archive](./docs/archive).

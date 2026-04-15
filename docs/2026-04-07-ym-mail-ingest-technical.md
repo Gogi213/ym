@@ -2,13 +2,23 @@
 
 ## Scope
 
-Текущий production-контур больше не использует Google Drive staging.
+Текущий target-контур больше не использует Google Drive staging.
 
-Идёт полный переезд storage/runtime слоя с Supabase/Postgres на Turso/libSQL.
+Целевой runtime:
+
+- `Apps Script`
+- `Python ingest service`
+- `Turso/libSQL`
+- `Python normalizer + sheet sync`
+
+Планируемый deployment target для ingest service:
+
+- `Northflank`
+
 На текущий момент Turso bootstrap, raw ingest, normalizer backend и operator read-path уже проверены живым smoke.
 Apps Script transport уже умеет работать не только с Supabase Function, но и с новым Python ingest service.
 
-Рабочая цепочка сейчас такая:
+Legacy production-цепочка сейчас такая:
 
 - `Gmail`
 - `Apps Script`
@@ -19,7 +29,7 @@ Apps Script transport уже умеет работать не только с Su
 - `Supabase operator export cache`
 - `Python operator sheet sync`
 
-Миграционный контур сейчас такой:
+Новый целевой контур сейчас такой:
 
 - `Turso bootstrap schema`
 - `Python libsql runtime`
@@ -32,10 +42,10 @@ Apps Script transport уже умеет работать не только с Su
 
 - чтение связок `primary -> secondary` из proxy spreadsheet;
 - поиск писем в Gmail по неполному вхождению темы;
-- отправка `xlsx/csv` вложений в Supabase;
+- отправка `xlsx/csv` вложений в ingest endpoint;
 - сохранение raw-слоя файлов и строк;
 - нормализация в канонический sparse-слой;
-- построение wide-export view в Supabase.
+- построение wide-export view в БД.
 - raw ingest в Turso/libSQL;
 - normalize/write/operator refresh в Turso/libSQL;
 - чтение `goal_mapping_wide`, `operator_export_rows`, `pipeline_runs` из Turso/libSQL.
@@ -139,6 +149,11 @@ Apps Script transport уже умеет работать не только с Su
   - admin client bootstrap;
   - raw writes;
   - `pipeline_runs` state updates.
+
+Статус:
+
+- legacy runtime;
+- остаётся в репозитории как fallback/reference до полного cutover на Python ingest service.
 
 ### Python normalizer
 
@@ -720,14 +735,14 @@ python scripts\bootstrap_turso.py
 
 Что ещё не закрыто:
 
-- production deployment target;
 - Apps Script production cutover как operational default;
 - живой ingest smoke уже не на in-memory bootstrap, а на реальную Turso migration DB.
 - generic container deployment artifact есть в репе:
   - [Dockerfile.ingest-service](/C:/visual%20projects/ym/Dockerfile.ingest-service)
   - [docker-compose.ingest-service.yml](/C:/visual%20projects/ym/docker-compose.ingest-service.yml)
   - [.env.ingest-service.example](/C:/visual%20projects/ym/.env.ingest-service.example)
-  - это не выбор хостинга, а только transport/runtime scaffold
+  - отдельный deploy runbook под Northflank:
+    - [2026-04-15-turso-northflank-deploy.md](/C:/visual%20projects/ym/docs/2026-04-15-turso-northflank-deploy.md)
 
 ### Live Turso smoke status
 

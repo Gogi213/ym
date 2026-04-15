@@ -1,4 +1,15 @@
-# YM Supabase Deploy Notes
+# YM Supabase Deploy Notes (Legacy)
+
+Этот документ больше не является target deploy path.
+
+Текущий target runtime:
+
+- `Apps Script -> Python ingest service -> Turso/libSQL`
+- deploy target for ingest service: `Northflank`
+
+Актуальный deploy runbook:
+
+- [2026-04-15-turso-northflank-deploy.md](/C:/visual%20projects/ym/docs/2026-04-15-turso-northflank-deploy.md)
 
 ## Current Shape
 
