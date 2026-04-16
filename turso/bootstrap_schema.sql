@@ -10,11 +10,16 @@ create table if not exists ingest_files (
   topic_role text not null check (topic_role in ('primary', 'secondary')),
   attachment_name text not null,
   attachment_type text not null check (attachment_type in ('xlsx', 'csv')),
-  status text not null check (status in ('ingested', 'skipped', 'error')),
+  status text not null check (status in ('ingested', 'skipped', 'error', 'uploaded', 'parsed', 'failed')),
   header_json text not null default '[]',
   row_count integer not null default 0,
+  r2_key text,
+  file_size_bytes integer,
+  parse_error text,
+  raw_revision integer not null default 0 check (raw_revision >= 0),
   error_text text,
-  created_at text not null default current_timestamp
+  created_at text not null default current_timestamp,
+  updated_at text not null default current_timestamp
 );
 
 create table if not exists ingest_rows (

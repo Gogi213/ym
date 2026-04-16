@@ -303,6 +303,9 @@ class IngestServiceStorageTests(unittest.TestCase):
                 "normalized_files": 0,
                 "normalized_rows": 0,
                 "raw_revision": 1,
+                "uploaded_files": 1,
+                "parsed_files": 0,
+                "failed_files": 0,
                 "last_error": None,
             },
         )
