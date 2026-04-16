@@ -490,20 +490,20 @@ test('buildIngestStatusRequest_ shapes generic ingest status request', () => {
 test('normalizeIngestStatusBaseUrl_ appends pipeline-runs when property contains only base url', () => {
   assert.equal(
     ingest.normalizeIngestStatusBaseUrl_(
-      'https://ym-ingest-service.onrender.com',
+      'https://example.com/ingest-service',
       ''
     ),
-    'https://ym-ingest-service.onrender.com/pipeline-runs'
+    'https://example.com/ingest-service/pipeline-runs'
   );
 });
 
 test('normalizeIngestStatusBaseUrl_ preserves explicit pipeline-runs suffix', () => {
   assert.equal(
     ingest.normalizeIngestStatusBaseUrl_(
-      'https://ym-ingest-service.onrender.com/pipeline-runs',
+      'https://example.com/ingest-service/pipeline-runs',
       ''
     ),
-    'https://ym-ingest-service.onrender.com/pipeline-runs'
+    'https://example.com/ingest-service/pipeline-runs'
   );
 });
 
