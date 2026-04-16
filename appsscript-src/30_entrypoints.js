@@ -130,11 +130,14 @@ function runForDate_(runtime, runDate, startedAtMs, runContext, options) {
   const requestBatches = chunkItems_(attachmentRequests, 10);
   for (let batchIndex = 0; batchIndex < requestBatches.length; batchIndex++) {
     const batch = requestBatches[batchIndex];
-    const responses = runtime.UrlFetchApp.fetchAll(batch);
     stats.uploadBatches++;
 
-    for (let responseIndex = 0; responseIndex < responses.length; responseIndex++) {
-      assertSuccessfulResponse_(responses[responseIndex], 'Attachment ingest');
+    for (let responseIndex = 0; responseIndex < batch.length; responseIndex++) {
+      const response = fetchRequestWithRetry_(runtime.UrlFetchApp, batch[responseIndex], {
+        maxAttempts: 3,
+        retryableStatuses: [502, 503, 504]
+      });
+      assertSuccessfulResponse_(response, 'Attachment ingest');
       stats.attachmentsSent++;
     }
 

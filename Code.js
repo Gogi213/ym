@@ -435,6 +435,11 @@ function sleepMs_(milliseconds) {
   }
 }
 
+function isRetriableFetchError_(error) {
+  const message = String(error && error.message ? error.message : error || '');
+  return /Address unavailable/i.test(message);
+}
+
 function normalizeIngestStatusBaseUrl_(statusUrl, ingestBaseUrl) {
   const explicitStatusUrl = String(statusUrl || '').trim().replace(/\/+$/, '');
   if (explicitStatusUrl) {
@@ -449,6 +454,36 @@ function normalizeIngestStatusBaseUrl_(statusUrl, ingestBaseUrl) {
 
 function isTransientHttpStatus_(responseCode) {
   return responseCode === 502 || responseCode === 503 || responseCode === 504;
+}
+
+function fetchRequestWithRetry_(urlFetchApp, request, options) {
+  const retryOptions = options || {};
+  const maxAttempts = Math.max(1, Number(retryOptions.maxAttempts || 1));
+  const retryableStatuses = retryOptions.retryableStatuses || [];
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const response = fetchRequest_(urlFetchApp, request);
+      const responseCode = Number(response.getResponseCode());
+      const shouldRetryStatus = retryableStatuses.indexOf(responseCode) !== -1;
+
+      if (shouldRetryStatus && attempt < maxAttempts - 1) {
+        sleepMs_((attempt + 1) * 1500);
+        continue;
+      }
+
+      return response;
+    } catch (error) {
+      if (isRetriableFetchError_(error) && attempt < maxAttempts - 1) {
+        sleepMs_((attempt + 1) * 1500);
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error('Unreachable fetch retry state');
 }
 
 function chunkItems_(items, chunkSize) {
@@ -570,8 +605,11 @@ function postReset_(urlFetchApp, settings, runDate) {
 function fetchRunDateExists_(urlFetchApp, settings, runDate) {
   if (settings.statusUrl) {
     const request = buildIngestStatusRequest_(settings, runDate);
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const response = fetchRequest_(urlFetchApp, request);
+    try {
+      const response = fetchRequestWithRetry_(urlFetchApp, request, {
+        maxAttempts: 3,
+        retryableStatuses: [502, 503, 504]
+      });
       const parsed = parseJsonResponse_(response);
 
       if (parsed.responseCode >= 200 && parsed.responseCode < 300) {
@@ -579,17 +617,18 @@ function fetchRunDateExists_(urlFetchApp, settings, runDate) {
       }
 
       if (isTransientHttpStatus_(parsed.responseCode)) {
-        if (attempt < 2) {
-          sleepMs_((attempt + 1) * 1500);
-          continue;
-        }
-
         return false;
       }
 
       throw new Error(
         'Run date existence check failed with HTTP ' + parsed.responseCode + ': ' + parsed.body
       );
+    } catch (error) {
+      if (isRetriableFetchError_(error)) {
+        return false;
+      }
+
+      throw error;
     }
   }
 
@@ -822,11 +861,14 @@ function runForDate_(runtime, runDate, startedAtMs, runContext, options) {
   const requestBatches = chunkItems_(attachmentRequests, 10);
   for (let batchIndex = 0; batchIndex < requestBatches.length; batchIndex++) {
     const batch = requestBatches[batchIndex];
-    const responses = runtime.UrlFetchApp.fetchAll(batch);
     stats.uploadBatches++;
 
-    for (let responseIndex = 0; responseIndex < responses.length; responseIndex++) {
-      assertSuccessfulResponse_(responses[responseIndex], 'Attachment ingest');
+    for (let responseIndex = 0; responseIndex < batch.length; responseIndex++) {
+      const response = fetchRequestWithRetry_(runtime.UrlFetchApp, batch[responseIndex], {
+        maxAttempts: 3,
+        retryableStatuses: [502, 503, 504]
+      });
+      assertSuccessfulResponse_(response, 'Attachment ingest');
       stats.attachmentsSent++;
     }
 

@@ -540,6 +540,89 @@ test('fetchRunDateExists_ passes status request as fetch(url, params) in Apps Sc
   assert.equal(calls[0].params.muteHttpExceptions, true);
 });
 
+test('fetchRequestWithRetry_ retries Address unavailable transport exception', () => {
+  let attempts = 0;
+  const urlFetchApp = {
+    fetch(url, params) {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error('Address unavailable: https://example.com/ingest');
+      }
+      return {
+        getResponseCode() {
+          return 200;
+        },
+        getContentText() {
+          return JSON.stringify({ ok: true });
+        }
+      };
+    }
+  };
+
+  const response = ingest.fetchRequestWithRetry_(
+    urlFetchApp,
+    {
+      url: 'https://example.com/ingest',
+      method: 'post',
+      headers: { 'x-ingest-token': 'secret-token' },
+      muteHttpExceptions: true,
+      payload: { foo: 'bar' }
+    },
+    {
+      maxAttempts: 3,
+      retryableStatuses: [502, 503, 504]
+    }
+  );
+
+  assert.deepEqual(response, {});
+  assert.equal(attempts, 2);
+});
+
+test('fetchRequestWithRetry_ retries transient 503 response and returns success', () => {
+  let attempts = 0;
+  const urlFetchApp = {
+    fetch() {
+      attempts += 1;
+      if (attempts === 1) {
+        return {
+          getResponseCode() {
+            return 503;
+          },
+          getContentText() {
+            return '';
+          }
+        };
+      }
+
+      return {
+        getResponseCode() {
+          return 200;
+        },
+        getContentText() {
+          return JSON.stringify({ ok: true });
+        }
+      };
+    }
+  };
+
+  const response = ingest.fetchRequestWithRetry_(
+    urlFetchApp,
+    {
+      url: 'https://example.com/ingest',
+      method: 'post',
+      headers: { 'x-ingest-token': 'secret-token' },
+      muteHttpExceptions: true
+    },
+    {
+      maxAttempts: 3,
+      retryableStatuses: [502, 503, 504]
+    }
+  );
+
+  assert.deepEqual(response, {});
+  assert.equal(attempts, 2);
+});
+
 test('fetchRunDateExists_ retries transient 502 from ingest status endpoint', () => {
   let attempts = 0;
   const urlFetchApp = {
