@@ -7,6 +7,7 @@ const EXPORT_NAMES = [
   'buildAttachmentRequest_',
   'buildIngestStatusRequest_',
   'fetchRunDateExists_',
+  'normalizeIngestStatusBaseUrl_',
   'buildRunContext_',
   'buildResetPayload_',
   'buildSupabaseSelectRequest_',

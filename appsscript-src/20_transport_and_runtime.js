@@ -65,6 +65,18 @@ function fetchRequest_(urlFetchApp, request) {
   });
 }
 
+function normalizeIngestStatusBaseUrl_(statusUrl, ingestBaseUrl) {
+  const explicitStatusUrl = String(statusUrl || '').trim().replace(/\/+$/, '');
+  if (explicitStatusUrl) {
+    return /\/pipeline-runs$/i.test(explicitStatusUrl)
+      ? explicitStatusUrl
+      : explicitStatusUrl + '/pipeline-runs';
+  }
+
+  const explicitIngestBaseUrl = String(ingestBaseUrl || '').trim().replace(/\/+$/, '');
+  return explicitIngestBaseUrl ? explicitIngestBaseUrl + '/pipeline-runs' : '';
+}
+
 function chunkItems_(items, chunkSize) {
   const chunks = [];
   const size = Math.max(1, Number(chunkSize || 1));
@@ -155,9 +167,7 @@ function getBackfillSettings_(propertiesService) {
       || scriptProperties.getProperty(CONFIG_.supabaseIngestTokenProperty)
       || ''
   ).trim();
-  const statusUrl = ingestStatusUrl
-    ? ingestStatusUrl.replace(/\/+$/, '')
-    : (ingestBaseUrl ? ingestBaseUrl.replace(/\/+$/, '') + '/pipeline-runs' : '');
+  const statusUrl = normalizeIngestStatusBaseUrl_(ingestStatusUrl, ingestBaseUrl);
 
   return {
     statusUrl,

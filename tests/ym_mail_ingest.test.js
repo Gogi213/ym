@@ -487,6 +487,26 @@ test('buildIngestStatusRequest_ shapes generic ingest status request', () => {
   assert.equal(request.headers['x-ingest-token'], 'secret-token');
 });
 
+test('normalizeIngestStatusBaseUrl_ appends pipeline-runs when property contains only base url', () => {
+  assert.equal(
+    ingest.normalizeIngestStatusBaseUrl_(
+      'https://ym-ingest-service.onrender.com',
+      ''
+    ),
+    'https://ym-ingest-service.onrender.com/pipeline-runs'
+  );
+});
+
+test('normalizeIngestStatusBaseUrl_ preserves explicit pipeline-runs suffix', () => {
+  assert.equal(
+    ingest.normalizeIngestStatusBaseUrl_(
+      'https://ym-ingest-service.onrender.com/pipeline-runs',
+      ''
+    ),
+    'https://ym-ingest-service.onrender.com/pipeline-runs'
+  );
+});
+
 test('fetchRunDateExists_ passes status request as fetch(url, params) in Apps Script shape', () => {
   const calls = [];
   const urlFetchApp = {
@@ -631,6 +651,38 @@ test('getBackfillSettings_ uses generic ingest status url when ingest base url i
     }),
     {
       statusUrl: 'https://example.com/ingest-service/pipeline-runs',
+      ingestToken: 'secret-token',
+      restUrl: '',
+      serviceRoleKey: '',
+      skipExistingEnabled: true
+    }
+  );
+});
+
+test('getBackfillSettings_ normalizes explicit INGEST_STATUS_URL base to pipeline-runs endpoint', () => {
+  const scriptProperties = {
+    getProperty(name) {
+      if (name === 'INGEST_BASE_URL') {
+        return 'https://example.com/ingest-service';
+      }
+      if (name === 'INGEST_STATUS_URL') {
+        return 'https://status.example.com/root';
+      }
+      if (name === 'INGEST_TOKEN') {
+        return 'secret-token';
+      }
+      return '';
+    }
+  };
+
+  assert.deepEqual(
+    ingest.getBackfillSettings_({
+      getScriptProperties() {
+        return scriptProperties;
+      }
+    }),
+    {
+      statusUrl: 'https://status.example.com/root/pipeline-runs',
       ingestToken: 'secret-token',
       restUrl: '',
       serviceRoleKey: '',
