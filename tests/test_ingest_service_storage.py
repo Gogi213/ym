@@ -303,9 +303,54 @@ class IngestServiceStorageTests(unittest.TestCase):
                 "normalized_files": 0,
                 "normalized_rows": 0,
                 "raw_revision": 1,
-                "uploaded_files": 1,
-                "parsed_files": 0,
-                "failed_files": 0,
+                "last_error": None,
+            },
+        )
+
+    def test_refresh_pipeline_run_after_ingest_keeps_raw_only_for_skipped_only_day(self):
+        from ingest_service.storage import (
+            fetch_pipeline_run_status,
+            insert_file_record,
+            mark_pipeline_run_after_reset,
+            refresh_pipeline_run_after_ingest,
+        )
+
+        connection = build_sqlite_connection()
+        mark_pipeline_run_after_reset(connection, "2026-04-15")
+        insert_file_record(
+            connection,
+            {
+                "run_date": "2026-04-15",
+                "message_id": "message-2",
+                "thread_id": "thread-2",
+                "message_date": "2026-04-15T09:00:00Z",
+                "message_subject": "Subject",
+                "primary_topic": "topic-primary",
+                "matched_topic": "topic-primary",
+                "topic_role": "primary",
+                "attachment_name": "report.xlsx",
+            },
+            attachment_type="xlsx",
+            status="skipped",
+            header=[],
+            row_count=0,
+            error_text=None,
+        )
+
+        refresh_pipeline_run_after_ingest(connection, "2026-04-15")
+
+        self.assertEqual(
+            fetch_pipeline_run_status(connection, "2026-04-15"),
+            {
+                "ok": True,
+                "run_date": "2026-04-15",
+                "exists": True,
+                "normalize_status": "raw_only",
+                "raw_files": 1,
+                "raw_rows": 0,
+                "normalized_files": 0,
+                "normalized_rows": 0,
+                "raw_revision": 1,
                 "last_error": None,
             },
         )

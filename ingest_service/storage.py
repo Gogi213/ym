@@ -110,8 +110,6 @@ def insert_file_record(
     header: list[str],
     row_count: int,
     error_text: str | None,
-    file_size_bytes: int | None = None,
-    parse_error: str | None = None,
 ) -> str:
     file_id = str(uuid4())
     raw_revision_cursor = connection.execute(
@@ -126,9 +124,8 @@ def insert_file_record(
         insert into ingest_files (
           id, run_date, message_id, thread_id, message_date, message_subject,
           primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
-          status, header_json, row_count, file_size_bytes, parse_error,
-          raw_revision, error_text, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          status, header_json, row_count, raw_revision, error_text, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             file_id,
@@ -145,8 +142,6 @@ def insert_file_record(
             status,
             json.dumps(header, ensure_ascii=False),
             int(row_count),
-            file_size_bytes,
-            parse_error,
             raw_revision,
             error_text,
             now,
@@ -205,20 +200,13 @@ def refresh_pipeline_run_after_ingest(connection, run_date: str) -> None:
     )
     files, columns = _fetchall_with_columns(files_cursor)
     total_files = len(files)
-    uploaded_files = 0
-    parsed_files = 0
-    failed_files = 0
+    ingested_files = 0
     raw_rows = 0
     for row in files:
         status = _row_value(row, columns, "status")
-        if status in ("ingested", "uploaded"):
-            uploaded_files += 1
+        if status == "ingested":
+            ingested_files += 1
             raw_rows += int(_row_value(row, columns, "row_count", 0) or 0)
-        elif status == "parsed":
-            parsed_files += 1
-            raw_rows += int(_row_value(row, columns, "row_count", 0) or 0)
-        elif status in ("error", "failed"):
-            failed_files += 1
 
     now = _utc_now_iso()
     connection.execute(
@@ -238,7 +226,7 @@ def refresh_pipeline_run_after_ingest(connection, run_date: str) -> None:
         (
             total_files,
             raw_rows,
-            "pending_normalize" if (uploaded_files + parsed_files) > 0 else "raw_only",
+            "pending_normalize" if ingested_files > 0 else "raw_only",
             now,
             now,
             run_date,
@@ -268,26 +256,6 @@ def fetch_pipeline_run_status(connection, run_date: str) -> dict[str, object]:
     if row is None:
         return {"ok": True, "run_date": run_date, "exists": False}
 
-    files_cursor = connection.execute(
-        "select status from ingest_files where run_date = ? and raw_revision = ?",
-        (
-            run_date,
-            int(_row_value(row, columns, "raw_revision", 0) or 0),
-        ),
-    )
-    files, file_columns = _fetchall_with_columns(files_cursor)
-    uploaded_files = 0
-    parsed_files = 0
-    failed_files = 0
-    for file_row in files:
-        status = _row_value(file_row, file_columns, "status")
-        if status in ("uploaded", "ingested"):
-            uploaded_files += 1
-        elif status == "parsed":
-            parsed_files += 1
-        elif status in ("failed", "error"):
-            failed_files += 1
-
     return {
         "ok": True,
         "run_date": str(_row_value(row, columns, "run_date") or run_date),
@@ -298,8 +266,5 @@ def fetch_pipeline_run_status(connection, run_date: str) -> dict[str, object]:
         "normalized_files": int(_row_value(row, columns, "normalized_files", 0) or 0),
         "normalized_rows": int(_row_value(row, columns, "normalized_rows", 0) or 0),
         "raw_revision": int(_row_value(row, columns, "raw_revision", 0) or 0),
-        "uploaded_files": uploaded_files,
-        "parsed_files": parsed_files,
-        "failed_files": failed_files,
         "last_error": _row_value(row, columns, "last_error"),
     }
