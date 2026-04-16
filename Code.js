@@ -419,6 +419,16 @@ function buildIngestStatusRequest_(settings, runDate) {
   };
 }
 
+function fetchRequest_(urlFetchApp, request) {
+  return urlFetchApp.fetch(request.url, {
+    method: request.method,
+    headers: request.headers,
+    muteHttpExceptions: request.muteHttpExceptions,
+    contentType: request.contentType,
+    payload: request.payload
+  });
+}
+
 function chunkItems_(items, chunkSize) {
   const chunks = [];
   const size = Math.max(1, Number(chunkSize || 1));
@@ -539,23 +549,21 @@ function postReset_(urlFetchApp, settings, runDate) {
 
 function fetchRunDateExists_(urlFetchApp, settings, runDate) {
   if (settings.statusUrl) {
+    const request = buildIngestStatusRequest_(settings, runDate);
     const response = assertSuccessfulResponse_(
-      urlFetchApp.fetch(
-        buildIngestStatusRequest_(settings, runDate)
-      ),
+      fetchRequest_(urlFetchApp, request),
       'Run date existence check'
     );
     return Boolean(response.json && response.json.exists);
   }
 
+  const request = buildSupabaseSelectRequest_(
+    settings,
+    'ingest_files',
+    buildRunDateExistsQuery_(runDate)
+  );
   const response = assertSuccessfulResponse_(
-    urlFetchApp.fetch(
-      buildSupabaseSelectRequest_(
-        settings,
-        'ingest_files',
-        buildRunDateExistsQuery_(runDate)
-      )
-    ),
+    fetchRequest_(urlFetchApp, request),
     'Run date existence check'
   );
 

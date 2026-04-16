@@ -487,6 +487,39 @@ test('buildIngestStatusRequest_ shapes generic ingest status request', () => {
   assert.equal(request.headers['x-ingest-token'], 'secret-token');
 });
 
+test('fetchRunDateExists_ passes status request as fetch(url, params) in Apps Script shape', () => {
+  const calls = [];
+  const urlFetchApp = {
+    fetch(url, params) {
+      calls.push({ url, params });
+      return {
+        getResponseCode() {
+          return 200;
+        },
+        getContentText() {
+          return JSON.stringify({ exists: true });
+        }
+      };
+    }
+  };
+
+  const exists = ingest.fetchRunDateExists_(
+    urlFetchApp,
+    {
+      statusUrl: 'https://example.com/api/pipeline-runs',
+      ingestToken: 'secret-token'
+    },
+    '2026-04-14'
+  );
+
+  assert.equal(exists, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://example.com/api/pipeline-runs/2026-04-14');
+  assert.equal(calls[0].params.method, 'get');
+  assert.equal(calls[0].params.headers['x-ingest-token'], 'secret-token');
+  assert.equal(calls[0].params.muteHttpExceptions, true);
+});
+
 test('buildRunContext_ loads timezone, topics, and ingest settings once', () => {
   const values = [
     ['Тема письма', 'Конверсии'],
