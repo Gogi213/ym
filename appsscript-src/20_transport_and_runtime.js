@@ -224,15 +224,20 @@ function getBackfillSettings_(propertiesService) {
 }
 
 function postReset_(urlFetchApp, settings, runDate) {
+  const request = {
+    url: settings.resetUrl,
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      'x-ingest-token': settings.ingestToken
+    },
+    muteHttpExceptions: true,
+    payload: JSON.stringify(buildResetPayload_(runDate))
+  };
   return assertSuccessfulResponse_(
-    urlFetchApp.fetch(settings.resetUrl, {
-      method: 'post',
-      contentType: 'application/json',
-      headers: {
-        'x-ingest-token': settings.ingestToken
-      },
-      muteHttpExceptions: true,
-      payload: JSON.stringify(buildResetPayload_(runDate))
+    fetchRequestWithRetry_(urlFetchApp, request, {
+      maxAttempts: 3,
+      retryableStatuses: [502, 503, 504]
     }),
     'Reset request'
   );
@@ -249,7 +254,12 @@ function fetchRunDateExists_(urlFetchApp, settings, runDate) {
       const parsed = parseJsonResponse_(response);
 
       if (parsed.responseCode >= 200 && parsed.responseCode < 300) {
-        return Boolean(parsed.json && parsed.json.exists);
+        if (!parsed.json || !parsed.json.exists) {
+          return false;
+        }
+
+        const normalizeStatus = String(parsed.json.normalize_status || '').trim();
+        return normalizeStatus ? normalizeStatus === 'ready' : true;
       }
 
       if (isTransientHttpStatus_(parsed.responseCode)) {

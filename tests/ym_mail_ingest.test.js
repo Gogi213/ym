@@ -517,7 +517,7 @@ test('fetchRunDateExists_ passes status request as fetch(url, params) in Apps Sc
           return 200;
         },
         getContentText() {
-          return JSON.stringify({ exists: true });
+          return JSON.stringify({ exists: true, normalize_status: 'ready' });
         }
       };
     }
@@ -538,6 +538,32 @@ test('fetchRunDateExists_ passes status request as fetch(url, params) in Apps Sc
   assert.equal(calls[0].params.method, 'get');
   assert.equal(calls[0].params.headers['x-ingest-token'], 'secret-token');
   assert.equal(calls[0].params.muteHttpExceptions, true);
+});
+
+test('fetchRunDateExists_ treats non-ready existing day as not yet complete', () => {
+  const urlFetchApp = {
+    fetch() {
+      return {
+        getResponseCode() {
+          return 200;
+        },
+        getContentText() {
+          return JSON.stringify({ exists: true, normalize_status: 'pending_normalize' });
+        }
+      };
+    }
+  };
+
+  const exists = ingest.fetchRunDateExists_(
+    urlFetchApp,
+    {
+      statusUrl: 'https://example.com/api/pipeline-runs',
+      ingestToken: 'secret-token'
+    },
+    '2026-04-14'
+  );
+
+  assert.equal(exists, false);
 });
 
 test('fetchRequestWithRetry_ retries Address unavailable transport exception', () => {
@@ -644,7 +670,7 @@ test('fetchRunDateExists_ retries transient 502 from ingest status endpoint', ()
           return 200;
         },
         getContentText() {
-          return JSON.stringify({ exists: true });
+          return JSON.stringify({ exists: true, normalize_status: 'ready' });
         }
       };
     }
