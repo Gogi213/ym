@@ -61,6 +61,7 @@ Responsibility:
 - write raw files, raw rows, and `pipeline_runs` state into Turso/libSQL.
 
 This repo keeps the ingest service as a local Python runtime. External exposure, if needed for Apps Script, is operational and outside the repo scope.
+The currently recommended operational bridge for local runs is a temporary public tunnel in front of the local ingest service.
 
 ### Turso/libSQL
 
@@ -175,6 +176,17 @@ $env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
 $env:TURSO_AUTH_TOKEN='<db-token>'
 uvicorn ingest_service.main:app --host 0.0.0.0 --port 8000
 ```
+
+Optional local exposure for Apps Script:
+
+```powershell
+cloudflared tunnel --url http://127.0.0.1:8000 --no-autoupdate
+```
+
+Use the emitted `https://<random>.trycloudflare.com` as:
+
+- `INGEST_BASE_URL`
+- optional `INGEST_STATUS_URL`
 
 Run local pipeline:
 

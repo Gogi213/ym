@@ -62,6 +62,7 @@ Transport config used by Apps Script:
 - optional `INGEST_STATUS_URL`
 
 Apps Script logic remains generic. This repo no longer documents a built-in hosted runtime target. If Apps Script must reach an external endpoint, that exposure is handled outside the repo.
+For local-only operation, the practical bridge is a temporary tunnel from the local ingest service to a public URL.
 
 ## Local Python Commands
 
@@ -101,6 +102,17 @@ $env:TURSO_AUTH_TOKEN='<db-token>'
 uvicorn ingest_service.main:app --host 0.0.0.0 --port 8000
 ```
 
+Optional: expose the local ingest service for Apps Script with a temporary Cloudflare quick tunnel:
+
+```powershell
+cloudflared tunnel --url http://127.0.0.1:8000 --no-autoupdate
+```
+
+Then use the emitted `https://<random>.trycloudflare.com` value for:
+
+- `INGEST_BASE_URL`
+- `INGEST_STATUS_URL`
+
 Run one-day normalize:
 
 ```powershell
@@ -131,6 +143,8 @@ The repo already contains validation work proving:
 
 Main technical note:
 - [2026-04-07-ym-mail-ingest-technical.md](./docs/2026-04-07-ym-mail-ingest-technical.md)
+- [2026-04-17-local-python-runbook.md](./docs/2026-04-17-local-python-runbook.md)
+- [2026-04-17-chat-transition.md](./docs/2026-04-17-chat-transition.md)
 
 Business note:
 - [2026-04-07-ym-mail-ingest-business.md](./docs/2026-04-07-ym-mail-ingest-business.md)

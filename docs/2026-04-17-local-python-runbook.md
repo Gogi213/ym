@@ -17,6 +17,23 @@ $env:TURSO_AUTH_TOKEN='<db-token>'
 uvicorn ingest_service.main:app --host 0.0.0.0 --port 8000
 ```
 
+## Step 1b: Expose local ingest for Apps Script
+
+Если Apps Script должен ходить в локальный ingest service, нужен публичный URL. Самый короткий рабочий путь:
+
+```powershell
+cloudflared tunnel --url http://127.0.0.1:8000 --no-autoupdate
+```
+
+Команда отдаст временный URL вида:
+
+- `https://<random>.trycloudflare.com`
+
+Именно этот URL нужно использовать для:
+
+- `INGEST_BASE_URL`
+- optional `INGEST_STATUS_URL`
+
 ## Step 2: Run Apps Script ingest
 
 Apps Script должен знать:
@@ -58,3 +75,5 @@ python scripts\normalize_supabase.py --run-date YYYY-MM-DD
 - Apps Script заканчивает работу на raw ingest.
 - `run_pipeline.py` — supported local post-processing entrypoint.
 - `pipeline_runs` — operational truth for day status.
+- Локальный `127.0.0.1` недоступен из Google напрямую. Без туннеля или другого публичного URL Apps Script в локальный ingest не попадёт.
+- `cloudflared` quick tunnel — временный operational bridge, а не новый supported hosted runtime.

@@ -14,3 +14,4 @@ supabase/.temp/
 export_rows_wide*.csv
 ingest-service.out.log
 ingest-service.err.log
+cloudflared*.log
