@@ -580,6 +580,35 @@ test('fetchRunDateExists_ retries transient 502 from ingest status endpoint', ()
   assert.equal(attempts, 2);
 });
 
+test('fetchRunDateExists_ degrades to false after repeated transient 503 from ingest status endpoint', () => {
+  let attempts = 0;
+  const urlFetchApp = {
+    fetch() {
+      attempts += 1;
+      return {
+        getResponseCode() {
+          return 503;
+        },
+        getContentText() {
+          return '';
+        }
+      };
+    }
+  };
+
+  const exists = ingest.fetchRunDateExists_(
+    urlFetchApp,
+    {
+      statusUrl: 'https://example.com/api/pipeline-runs',
+      ingestToken: 'secret-token'
+    },
+    '2026-04-15'
+  );
+
+  assert.equal(exists, false);
+  assert.equal(attempts, 3);
+});
+
 test('buildRunContext_ loads timezone, topics, and ingest settings once', () => {
   const values = [
     ['Тема письма', 'Конверсии'],

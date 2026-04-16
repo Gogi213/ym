@@ -214,9 +214,13 @@ function fetchRunDateExists_(urlFetchApp, settings, runDate) {
         return Boolean(parsed.json && parsed.json.exists);
       }
 
-      if (isTransientHttpStatus_(parsed.responseCode) && attempt < 2) {
-        sleepMs_((attempt + 1) * 1500);
-        continue;
+      if (isTransientHttpStatus_(parsed.responseCode)) {
+        if (attempt < 2) {
+          sleepMs_((attempt + 1) * 1500);
+          continue;
+        }
+
+        return false;
       }
 
       throw new Error(
