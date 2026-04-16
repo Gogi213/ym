@@ -65,6 +65,12 @@ function fetchRequest_(urlFetchApp, request) {
   });
 }
 
+function sleepMs_(milliseconds) {
+  if (typeof Utilities !== 'undefined' && Utilities.sleep) {
+    Utilities.sleep(milliseconds);
+  }
+}
+
 function normalizeIngestStatusBaseUrl_(statusUrl, ingestBaseUrl) {
   const explicitStatusUrl = String(statusUrl || '').trim().replace(/\/+$/, '');
   if (explicitStatusUrl) {
@@ -75,6 +81,10 @@ function normalizeIngestStatusBaseUrl_(statusUrl, ingestBaseUrl) {
 
   const explicitIngestBaseUrl = String(ingestBaseUrl || '').trim().replace(/\/+$/, '');
   return explicitIngestBaseUrl ? explicitIngestBaseUrl + '/pipeline-runs' : '';
+}
+
+function isTransientHttpStatus_(responseCode) {
+  return responseCode === 502 || responseCode === 503 || responseCode === 504;
 }
 
 function chunkItems_(items, chunkSize) {
@@ -196,11 +206,23 @@ function postReset_(urlFetchApp, settings, runDate) {
 function fetchRunDateExists_(urlFetchApp, settings, runDate) {
   if (settings.statusUrl) {
     const request = buildIngestStatusRequest_(settings, runDate);
-    const response = assertSuccessfulResponse_(
-      fetchRequest_(urlFetchApp, request),
-      'Run date existence check'
-    );
-    return Boolean(response.json && response.json.exists);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const response = fetchRequest_(urlFetchApp, request);
+      const parsed = parseJsonResponse_(response);
+
+      if (parsed.responseCode >= 200 && parsed.responseCode < 300) {
+        return Boolean(parsed.json && parsed.json.exists);
+      }
+
+      if (isTransientHttpStatus_(parsed.responseCode) && attempt < 2) {
+        sleepMs_((attempt + 1) * 1500);
+        continue;
+      }
+
+      throw new Error(
+        'Run date existence check failed with HTTP ' + parsed.responseCode + ': ' + parsed.body
+      );
+    }
   }
 
   const request = buildSupabaseSelectRequest_(

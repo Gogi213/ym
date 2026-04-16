@@ -540,6 +540,46 @@ test('fetchRunDateExists_ passes status request as fetch(url, params) in Apps Sc
   assert.equal(calls[0].params.muteHttpExceptions, true);
 });
 
+test('fetchRunDateExists_ retries transient 502 from ingest status endpoint', () => {
+  let attempts = 0;
+  const urlFetchApp = {
+    fetch(url, params) {
+      attempts += 1;
+      if (attempts === 1) {
+        return {
+          getResponseCode() {
+            return 502;
+          },
+          getContentText() {
+            return '<html>bad gateway</html>';
+          }
+        };
+      }
+
+      return {
+        getResponseCode() {
+          return 200;
+        },
+        getContentText() {
+          return JSON.stringify({ exists: true });
+        }
+      };
+    }
+  };
+
+  const exists = ingest.fetchRunDateExists_(
+    urlFetchApp,
+    {
+      statusUrl: 'https://example.com/api/pipeline-runs',
+      ingestToken: 'secret-token'
+    },
+    '2026-04-14'
+  );
+
+  assert.equal(exists, true);
+  assert.equal(attempts, 2);
+});
+
 test('buildRunContext_ loads timezone, topics, and ingest settings once', () => {
   const values = [
     ['Тема письма', 'Конверсии'],
