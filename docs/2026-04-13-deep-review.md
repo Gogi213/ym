@@ -15,6 +15,14 @@
 
 ## Краткий вердикт
 
+Актуальная operational рамка после cleanup:
+
+- `Apps Script`
+- облачная БД
+- local Python runner
+
+Ниже review относится к data model, normalizer и execution semantics именно внутри этого контура.
+
 Проект уже вышел из состояния MVP-хаоса и умеет работать end-to-end, но текущая форма всё ещё слишком batch-heavy.
 
 Главное:

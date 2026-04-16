@@ -186,9 +186,7 @@ python scripts\run_pipeline.py --service-account-json key\service-account.json
 
 This repo no longer treats the following as supported targets:
 
-- Render runtime
-- Northflank runtime
-- Cloudflare Worker runtime
+- hosted runtime experiments
 - Docker/container deployment scaffolds
 
 Those paths were experiments and are not part of the supported operating model anymore.

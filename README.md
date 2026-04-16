@@ -20,7 +20,7 @@ What this repo does **not** maintain anymore:
 
 - hosted deployment target for the ingest service
 - Docker/container deployment path
-- Render / Northflank / Cloudflare Worker runtime experiments
+- abandoned hosted-runtime experiments
 
 ## Repository Layout
 

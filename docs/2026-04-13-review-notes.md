@@ -10,6 +10,12 @@ Review cycle over the current YM pipeline with focus on:
 
 The goal of this memo is not to restate the architecture, but to capture the main risks and known limits in a form that survives chat history.
 
+Актуальная operational рамка после cleanup:
+
+- Apps Script = ingest collector
+- облачная БД = source of truth
+- local Python = post-processing runner
+
 ## Smell Review
 
 ### 1. Apps Script remains transport-heavy
