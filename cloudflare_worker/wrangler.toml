@@ -2,7 +2,4 @@ name = "ym-ingest-worker"
 main = "src/index.js"
 compatibility_date = "2026-04-17"
 workers_dev = true
-
-[[r2_buckets]]
-binding = "RAW_FILES_BUCKET"
-bucket_name = "ym-raw-files"
+account_id = "139bbc479d77176d2efa94a03ee92cc4"

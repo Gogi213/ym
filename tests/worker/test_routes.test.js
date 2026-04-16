@@ -8,7 +8,6 @@ function stubEnv(overrides = {}) {
     INGEST_TOKEN: 'token',
     TURSO_DATABASE_URL: 'libsql://example.turso.io',
     TURSO_AUTH_TOKEN: 'secret',
-    RAW_FILES_BUCKET: { put() {} },
     ...overrides,
   };
 }

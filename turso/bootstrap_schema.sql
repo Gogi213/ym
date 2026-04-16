@@ -13,7 +13,6 @@ create table if not exists ingest_files (
   status text not null check (status in ('ingested', 'skipped', 'error', 'uploaded', 'parsed', 'failed')),
   header_json text not null default '[]',
   row_count integer not null default 0,
-  r2_key text,
   file_size_bytes integer,
   parse_error text,
   raw_revision integer not null default 0 check (raw_revision >= 0),

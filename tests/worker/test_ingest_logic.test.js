@@ -8,7 +8,6 @@ function buildEnv(overrides = {}) {
     INGEST_TOKEN: 'secret-token',
     TURSO_DATABASE_URL: 'libsql://example.turso.io',
     TURSO_AUTH_TOKEN: 'secret',
-    RAW_FILES_BUCKET: { put() {} },
     __tursoClient: {
       async resetRunDate(runDate) {
         return { ok: true, action: 'reset', run_date: runDate };
