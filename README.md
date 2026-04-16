@@ -29,7 +29,7 @@ Pipeline for ingesting Gmail report attachments from Apps Script into a Python i
 Current target runtime is:
 
 - `Apps Script -> Python ingest service -> Turso/libSQL -> Python normalize/sync -> Google Sheets`
-- deployment target for the new ingest service: `Northflank`
+- live ingest runtime: `Render`
 
 Turso migration work has started:
 
@@ -49,7 +49,7 @@ Turso migration work has started:
 What is not cut over yet:
 
 - production env is not switched to Turso by default
-- Apps Script is not yet pointed at the live Northflank URL
+- Apps Script is not yet pointed at the live Render URL
 - the old Supabase runtime still exists in repo as legacy fallback/reference during migration
 
 ## Runtime Shape
@@ -72,7 +72,7 @@ What is not cut over yet:
      - `POST /reset`
      - `POST /ingest`
      - `GET /pipeline-runs/{run_date}`
-   - deployment target: `Northflank`
+   - live runtime: `Render`
 5. Python normalizer builds canonical fact tables and `export_rows_wide`.
    - secondary topics do not become standalone operator topics
    - they are attached to their `primary_topic` only when the exact grain matches
@@ -173,9 +173,9 @@ Copy-Item .env.ingest-service.example .env.ingest-service
 docker compose -f docker-compose.ingest-service.yml up --build
 ```
 
-Northflank deployment:
+Render deployment:
 
-- see [docs/2026-04-15-turso-northflank-deploy.md](./docs/2026-04-15-turso-northflank-deploy.md)
+- see [docs/2026-04-16-turso-render-deploy.md](./docs/2026-04-16-turso-render-deploy.md)
 
 Turso-backed normalizer smoke:
 

@@ -15,3 +15,6 @@ export_rows_wide*.csv
 ingest-service.out.log
 ingest-service.err.log
 .env.ingest-service
+render-*.json
+render-*.headers
+render-*.body

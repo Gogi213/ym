@@ -13,7 +13,7 @@
 
 Планируемый deployment target для ingest service:
 
-- `Northflank`
+- `Render`
 
 На текущий момент Turso bootstrap, raw ingest, normalizer backend и operator read-path уже проверены живым smoke.
 Apps Script transport уже умеет работать не только с Supabase Function, но и с новым Python ingest service.
@@ -741,8 +741,8 @@ python scripts\bootstrap_turso.py
   - [Dockerfile.ingest-service](/C:/visual%20projects/ym/Dockerfile.ingest-service)
   - [docker-compose.ingest-service.yml](/C:/visual%20projects/ym/docker-compose.ingest-service.yml)
   - [.env.ingest-service.example](/C:/visual%20projects/ym/.env.ingest-service.example)
-  - отдельный deploy runbook под Northflank:
-    - [2026-04-15-turso-northflank-deploy.md](/C:/visual%20projects/ym/docs/2026-04-15-turso-northflank-deploy.md)
+  - отдельный deploy runbook под Render:
+    - [2026-04-16-turso-render-deploy.md](/C:/visual%20projects/ym/docs/2026-04-16-turso-render-deploy.md)
 
 ### Live Turso smoke status
 
