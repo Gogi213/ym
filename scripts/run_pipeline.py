@@ -189,7 +189,9 @@ def run_pipeline(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run normalize + sheet sync pipeline for pending or explicit run dates.")
+    parser = argparse.ArgumentParser(
+        description="Primary local post-ingest pipeline for the direct Apps Script -> Turso contour."
+    )
     parser.add_argument("--spreadsheet-id", default=DEFAULT_SPREADSHEET_ID)
     parser.add_argument("--service-account-json", required=True)
     parser.add_argument("--run-date", action="append", dest="run_dates", default=[])

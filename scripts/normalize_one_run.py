@@ -48,7 +48,9 @@ from scripts.normalize.transform import (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Normalize raw Supabase ingest rows into canonical fact tables.")
+    parser = argparse.ArgumentParser(
+        description="One-run local normalization CLI for the current Turso-backed contour."
+    )
     parser.add_argument("--run-date", required=True, help="Target run date in YYYY-MM-DD format.")
     return parser.parse_args()
 

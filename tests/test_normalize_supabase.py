@@ -1,7 +1,7 @@
 import unittest
 from decimal import Decimal
 
-from scripts.normalize_supabase import (
+from scripts.normalize_one_run import (
     assign_goal_slots,
     build_affected_row_keys,
     build_fact_payload,

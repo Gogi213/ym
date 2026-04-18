@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 import time
 from typing import Any, Callable, Dict, Optional, Sequence
 
@@ -21,7 +23,185 @@ from .db import (
     upsert_topic_goal_slots,
 )
 from .fields import build_topic_goal_slot_records
+from .raw_parse import parse_attachment
 from .transform import build_affected_row_keys, build_normalized_payloads, collect_goal_slots
+
+
+def _row_value(row, columns: list[str], key: str, default=None):
+    if row is None:
+        return default
+    if isinstance(row, dict):
+        return row.get(key, default)
+    try:
+        return row[key]
+    except (TypeError, KeyError, IndexError):
+        pass
+    if hasattr(row, "keys"):
+        try:
+            return row[key]
+        except Exception:
+            pass
+    try:
+        index = columns.index(key)
+    except ValueError:
+        return default
+    return row[index] if index < len(row) else default
+
+
+def _fetchall_with_columns(cursor):
+    rows = cursor.fetchall()
+    columns = [description[0] for description in (cursor.description or [])]
+    return rows, columns
+
+
+def _build_row_dicts(header: list[str], rows: list[list[str]]) -> list[dict[str, str]]:
+    return [
+        {
+            str(header[index]): str(row[index] if index < len(row) else "")
+            for index in range(len(header))
+            if str(header[index]).strip()
+        }
+        for row in rows
+    ]
+
+
+def _replace_ingest_rows(conn, *, file_id: str, run_date: str, rows: list[dict[str, str]]) -> None:
+    conn.execute("delete from ingest_rows where file_id = ?", (file_id,))
+    if not rows:
+        return
+    conn.executemany(
+        """
+        insert into ingest_rows (file_id, run_date, row_index, row_json)
+        values (?, ?, ?, ?)
+        """,
+        [
+            (
+                file_id,
+                run_date,
+                index + 1,
+                json.dumps(row, ensure_ascii=False),
+            )
+            for index, row in enumerate(rows)
+        ],
+    )
+
+
+def _refresh_pipeline_run_after_prepare(conn, run_date: str) -> None:
+    files_cursor = conn.execute(
+        "select status, row_count from ingest_files where run_date = ?",
+        (run_date,),
+    )
+    files, columns = _fetchall_with_columns(files_cursor)
+    total_files = len(files)
+    ingested_files = 0
+    raw_rows = 0
+    for row in files:
+        if _row_value(row, columns, "status") == "ingested":
+            ingested_files += 1
+            raw_rows += int(_row_value(row, columns, "row_count", 0) or 0)
+
+    conn.execute(
+        """
+        update pipeline_runs
+        set raw_files = ?,
+            raw_rows = ?,
+            normalized_files = 0,
+            normalized_rows = 0,
+            normalize_status = ?,
+            last_ingest_at = current_timestamp,
+            normalized_at = null,
+            last_error = null,
+            updated_at = current_timestamp
+        where run_date = ?
+        """,
+        (
+            total_files,
+            raw_rows,
+            "pending_normalize" if ingested_files > 0 else "raw_only",
+            run_date,
+        ),
+    )
+
+
+def prepare_raw_ingest_files(conn, run_date: str) -> Dict[str, int]:
+    cursor = conn.execute(
+        """
+        select id, attachment_type
+        from ingest_files
+        where run_date = ?
+          and (
+            status = 'raw_only'
+            or (
+              status = 'ingested'
+              and coalesce(row_count, 0) = 0
+              and coalesce(header_json, '[]') = '[]'
+              and exists (select 1 from ingest_file_payloads p where p.file_id = ingest_files.id)
+              and not exists (select 1 from ingest_rows r where r.file_id = ingest_files.id)
+            )
+          )
+        order by message_date, created_at, id
+        """,
+        (run_date,),
+    )
+    raw_files, columns = _fetchall_with_columns(cursor)
+    if not raw_files:
+        return {"prepared_files": 0, "ingested_files": 0, "skipped_files": 0, "error_files": 0}
+
+    file_ids = [str(_row_value(row, columns, "id") or "") for row in raw_files if str(_row_value(row, columns, "id") or "").strip()]
+    payloads_by_file_id = fetch_ingest_payloads(conn, file_ids)
+    stats = {"prepared_files": 0, "ingested_files": 0, "skipped_files": 0, "error_files": 0}
+
+    for row in raw_files:
+        file_id = str(_row_value(row, columns, "id") or "")
+        attachment_type = str(_row_value(row, columns, "attachment_type") or "")
+        if not file_id:
+            continue
+        stats["prepared_files"] += 1
+        try:
+            payload = payloads_by_file_id.get(file_id) or {}
+            file_base64 = str(payload.get("file_base64") or "")
+            if not file_base64:
+                raise ValueError(f"Missing payload for raw file {file_id}")
+
+            parsed = parse_attachment(attachment_type, base64.b64decode(file_base64))
+            status = "ingested" if parsed.table else "skipped"
+            header = parsed.table.header if parsed.table else []
+            row_dicts = _build_row_dicts(header, parsed.table.rows if parsed.table else [])
+            _replace_ingest_rows(conn, file_id=file_id, run_date=run_date, rows=row_dicts)
+            conn.execute(
+                """
+                update ingest_files
+                set status = ?,
+                    header_json = ?,
+                    row_count = ?,
+                    error_text = null
+                where id = ?
+                """,
+                (
+                    status,
+                    json.dumps(header, ensure_ascii=False),
+                    len(row_dicts),
+                    file_id,
+                ),
+            )
+            stats["ingested_files" if status == "ingested" else "skipped_files"] += 1
+        except Exception as error:
+            _replace_ingest_rows(conn, file_id=file_id, run_date=run_date, rows=[])
+            conn.execute(
+                """
+                update ingest_files
+                set status = 'error',
+                    header_json = '[]',
+                    row_count = 0,
+                    error_text = ?
+                where id = ?
+                """,
+                (str(error), file_id),
+            )
+            stats["error_files"] += 1
+
+    _refresh_pipeline_run_after_prepare(conn, run_date)
+    return stats
 
 
 def _sync_if_supported(conn) -> None:
@@ -123,6 +303,9 @@ def normalize_run(
     phase("normalize_connecting")
     with connect_db() as conn:
         try:
+            phase("normalize_prepare_raw_files_started")
+            prepared_stats = prepare_raw_ingest_files(conn, run_date)
+            phase("normalize_prepare_raw_files_finished", **prepared_stats)
             phase("normalize_fetch_ingested_files_started")
             files = fetch_ingested_files(conn, run_date)
             phase("normalize_fetch_ingested_files_finished", files=len(files))

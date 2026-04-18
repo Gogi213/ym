@@ -1,5 +1,7 @@
 create table if not exists ingest_files (
   id text primary key,
+  raw_file_key text not null unique,
+  file_hash text not null,
   run_date text not null,
   message_id text not null,
   thread_id text,
@@ -10,7 +12,7 @@ create table if not exists ingest_files (
   topic_role text not null check (topic_role in ('primary', 'secondary')),
   attachment_name text not null,
   attachment_type text not null check (attachment_type in ('xlsx', 'csv')),
-  status text not null check (status in ('ingested', 'skipped', 'error')),
+  status text not null check (status in ('raw_only', 'ingested', 'skipped', 'error')),
   header_json text not null default '[]',
   row_count integer not null default 0,
   raw_revision integer not null default 0 check (raw_revision >= 0),
@@ -144,6 +146,8 @@ create table if not exists operator_export_rows (
 );
 
 create index if not exists ingest_files_run_date_idx on ingest_files (run_date);
+create index if not exists ingest_files_raw_file_key_idx on ingest_files (raw_file_key);
+create index if not exists ingest_files_file_hash_idx on ingest_files (file_hash);
 create index if not exists ingest_files_message_id_idx on ingest_files (message_id);
 create index if not exists ingest_files_matched_topic_idx on ingest_files (matched_topic);
 create index if not exists ingest_files_primary_topic_idx on ingest_files (primary_topic);

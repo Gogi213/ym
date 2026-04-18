@@ -2,6 +2,8 @@ import unittest
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
+import os
+import sqlite3
 
 from scripts.run_pipeline import (
     has_failed_runs,
@@ -10,6 +12,14 @@ from scripts.run_pipeline import (
     should_use_bootstrap_mode,
     should_sync_full_operator_views,
 )
+from scripts.bootstrap_turso import load_bootstrap_sql
+
+
+def build_bootstrap_connection():
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.executescript(load_bootstrap_sql())
+    return connection
 
 
 class RunPipelineTests(unittest.TestCase):
@@ -82,6 +92,50 @@ class RunPipelineTests(unittest.TestCase):
                 ["2026-04-12", "2026-04-11"],
             )
         )
+
+    def test_normalize_run_prepares_raw_only_files_before_building_fact_rows(self):
+        from scripts.normalize.pipeline import normalize_run
+
+        connection = build_bootstrap_connection()
+        connection.executescript(
+            """
+            insert into pipeline_runs (
+              run_date, raw_revision, normalize_status, raw_files, raw_rows,
+              normalized_files, normalized_rows, last_ingest_at, normalized_at,
+              last_error, updated_at
+            ) values (
+              '2026-04-14', 1, 'pending_normalize', 1, 0, 0, 0,
+              '2026-04-14T09:00:00Z', null, null, '2026-04-14T09:00:00Z'
+            );
+            insert into ingest_files (
+              id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject,
+              primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
+              status, header_json, row_count, error_text
+            ) values (
+              'file-1', 'rk-file-1', 'hash-file-1', '2026-04-14', 'm1', 't1', '2026-04-14T10:00:00Z',
+              'Отчет за 2026-04-14', 'Topic A', 'Topic A', 'primary',
+              'a.csv', 'csv', 'raw_only', '[]', 0, null
+            );
+            insert into ingest_file_payloads (file_id, content_type, file_size_bytes, file_base64)
+            values ('file-1', 'text/csv', 53, 'VVRNIFNvdXJjZTtVVE0gQ2FtcGFpZ2470JLQuNC30LjRgtGLCmdvb2dsZTticmFuZDsxMAo=');
+            """
+        )
+        connection.commit()
+
+        with patch("scripts.normalize.pipeline.connect_db", return_value=connection):
+            result = normalize_run("2026-04-14", defer_finalize=True)
+
+        file_row = connection.execute(
+            "select status, row_count from ingest_files where id = 'file-1'"
+        ).fetchone()
+        raw_rows = connection.execute(
+            "select count(*) from ingest_rows where file_id = 'file-1'"
+        ).fetchone()[0]
+
+        self.assertEqual(result["files"], 1)
+        self.assertEqual(result["fact_rows"], 1)
+        self.assertEqual(dict(file_row), {"status": "ingested", "row_count": 1})
+        self.assertEqual(raw_rows, 1)
 
     @patch("scripts.run_pipeline.sync_status_only")
     @patch("scripts.run_pipeline.sync_operator_views")

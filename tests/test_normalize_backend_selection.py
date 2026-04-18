@@ -4,12 +4,18 @@ from unittest import mock
 
 
 class NormalizeBackendSelectionTests(unittest.TestCase):
-    def test_connect_db_uses_postgres_backend_by_default(self):
+    def test_backend_name_is_always_turso(self):
+        from scripts.normalize import db
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(db.backend_name(), "turso")
+
+    def test_connect_db_uses_turso_runtime(self):
         from scripts.normalize import db
 
         fake_connection = object()
         with mock.patch.dict(os.environ, {}, clear=True):
-            with mock.patch("scripts.normalize.db.db_connection.connect_db", return_value=fake_connection) as connect_mock:
+            with mock.patch("scripts.normalize.db.turso_connection.connect_db", return_value=fake_connection) as connect_mock:
                 resolved = db.connect_db()
 
         self.assertIs(resolved, fake_connection)
@@ -27,17 +33,6 @@ class NormalizeBackendSelectionTests(unittest.TestCase):
             },
             clear=True,
         ):
-            with mock.patch("scripts.normalize.db.turso_connection.connect_db", return_value=fake_connection) as connect_mock:
-                resolved = db.connect_db()
-
-        self.assertIs(resolved, fake_connection)
-        connect_mock.assert_called_once_with()
-
-    def test_connect_db_uses_turso_backend_when_requested(self):
-        from scripts.normalize import db
-
-        fake_connection = object()
-        with mock.patch.dict(os.environ, {"NORMALIZE_DB_BACKEND": "turso"}, clear=True):
             with mock.patch("scripts.normalize.db.turso_connection.connect_db", return_value=fake_connection) as connect_mock:
                 resolved = db.connect_db()
 

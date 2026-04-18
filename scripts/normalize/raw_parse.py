@@ -1,12 +1,31 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import dataclass
 import io
 import re
 import zipfile
+from typing import Any
 from xml.etree import ElementTree as ET
 
-from ingest_service.types import ParseDebug, ParsedTable, ParseResult
+
+@dataclass(frozen=True)
+class ParsedTable:
+    header: list[str]
+    rows: list[list[str]]
+
+
+@dataclass(frozen=True)
+class ParseDebug:
+    type: str
+    summary: Any
+
+
+@dataclass(frozen=True)
+class ParseResult:
+    table: ParsedTable | None
+    debug: ParseDebug
+
 
 UTM_HEADERS = {
     "utm_source",

@@ -423,13 +423,14 @@ test('markLatestMessagesByTopic_ keeps only the latest message for each topic', 
 
 test('buildAttachmentRequest_ shapes one UrlFetchApp request for multipart upload', () => {
   const blob = {
-    setNameCalls: [],
-    setName(name) {
-      this.setNameCalls.push(name);
-      return { renamedTo: name };
+    getBytes() {
+      return [65, 66, 67];
     }
   };
   const attachment = {
+    getContentType() {
+      return 'text/csv';
+    },
     copyBlob() {
       return blob;
     }
@@ -437,74 +438,63 @@ test('buildAttachmentRequest_ shapes one UrlFetchApp request for multipart uploa
 
   const request = ingest.buildAttachmentRequest_(
     {
-      functionUrl: 'https://example.supabase.co/functions/v1/mail-ingest',
-      ingestToken: 'secret-token'
+      mode: 'turso',
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token'
     },
     attachment,
     {
+      run_date: '2026-04-06',
+      primary_topic: 'weekly report',
+      matched_topic: 'weekly report',
+      topic_role: 'primary',
+      message_subject: 'Weekly report for Solta',
+      message_date: '2026-04-06T09:30:00.000Z',
+      message_id: 'msg-1',
+      thread_id: 'thr-1',
       attachment_name: 'client.xlsx',
+      attachment_type: 'csv',
       action: 'ingest'
     }
   );
 
-  assert.equal(request.url, 'https://example.supabase.co/functions/v1/mail-ingest');
+  assert.equal(request.url, 'https://example.turso.io/v2/pipeline');
   assert.equal(request.method, 'post');
-  assert.equal(request.headers['x-ingest-token'], 'secret-token');
-  assert.equal(request.payload.meta, JSON.stringify({
-    attachment_name: 'client.xlsx',
-    action: 'ingest'
-  }));
-  assert.deepEqual(request.payload.file, { renamedTo: 'client.xlsx' });
+  assert.equal(request.contentType, 'application/json');
+  assert.equal(request.headers.Authorization, 'Bearer secret-token');
+  assert.match(request.payload, /insert into ingest_files/i);
+  assert.match(request.payload, /insert into ingest_file_payloads/i);
+  assert.match(request.payload, /'raw_only'/i);
+  assert.match(request.payload, /raw_file_key/i);
+  assert.match(request.payload, /file_hash/i);
+  assert.match(request.payload, /on conflict/i);
+  const parsedPayload = JSON.parse(request.payload);
+  const ingestInsertSql = parsedPayload.requests[1].stmt.sql;
+  assert.doesNotMatch(ingestInsertSql, /raw_revision/i);
 });
 
-test('buildSupabaseSelectRequest_ shapes REST request for Supabase REST read', () => {
-  const request = ingest.buildSupabaseSelectRequest_(
+test('buildTursoPipelineRequest_ shapes SQL over HTTP request for Turso', () => {
+  const request = ingest.buildTursoPipelineRequest_(
     {
-      restUrl: 'https://example.supabase.co/rest/v1',
-      serviceRoleKey: 'secret-key'
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token'
     },
-    'goal_mapping_wide',
-    'select=*'
+    [
+      { type: 'execute', stmt: { sql: 'select 1' } },
+      { type: 'close' }
+    ]
   );
 
-  assert.equal(request.url, 'https://example.supabase.co/rest/v1/goal_mapping_wide?select=*');
-  assert.equal(request.method, 'get');
-  assert.equal(request.headers.apikey, 'secret-key');
-  assert.equal(request.headers.Authorization, 'Bearer secret-key');
-});
-
-test('buildIngestStatusRequest_ shapes generic ingest status request', () => {
-  const request = ingest.buildIngestStatusRequest_(
-    {
-      statusUrl: 'https://example.com/api/pipeline-runs',
-      ingestToken: 'secret-token'
-    },
-    '2026-04-14'
-  );
-
-  assert.equal(request.url, 'https://example.com/api/pipeline-runs/2026-04-14');
-  assert.equal(request.method, 'get');
-  assert.equal(request.headers['x-ingest-token'], 'secret-token');
-});
-
-test('normalizeIngestStatusBaseUrl_ appends pipeline-runs when property contains only base url', () => {
-  assert.equal(
-    ingest.normalizeIngestStatusBaseUrl_(
-      'https://example.com/ingest-service',
-      ''
-    ),
-    'https://example.com/ingest-service/pipeline-runs'
-  );
-});
-
-test('normalizeIngestStatusBaseUrl_ preserves explicit pipeline-runs suffix', () => {
-  assert.equal(
-    ingest.normalizeIngestStatusBaseUrl_(
-      'https://example.com/ingest-service/pipeline-runs',
-      ''
-    ),
-    'https://example.com/ingest-service/pipeline-runs'
-  );
+  assert.equal(request.url, 'https://example.turso.io/v2/pipeline');
+  assert.equal(request.method, 'post');
+  assert.equal(request.contentType, 'application/json');
+  assert.equal(request.headers.Authorization, 'Bearer secret-token');
+  assert.deepEqual(JSON.parse(request.payload), {
+    requests: [
+      { type: 'execute', stmt: { sql: 'select 1' } },
+      { type: 'close' }
+    ]
+  });
 });
 
 test('fetchRunDateExists_ passes status request as fetch(url, params) in Apps Script shape', () => {
@@ -517,7 +507,21 @@ test('fetchRunDateExists_ passes status request as fetch(url, params) in Apps Sc
           return 200;
         },
         getContentText() {
-          return JSON.stringify({ exists: true, normalize_status: 'ready' });
+          return JSON.stringify({
+            results: [
+              {
+                type: 'ok',
+                response: {
+                  type: 'execute',
+                  result: {
+                    cols: ['normalize_status'],
+                    rows: [[{ type: 'text', value: 'ready' }]]
+                  }
+                }
+              },
+              { type: 'ok', response: { type: 'close' } }
+            ]
+          });
         }
       };
     }
@@ -526,17 +530,18 @@ test('fetchRunDateExists_ passes status request as fetch(url, params) in Apps Sc
   const exists = ingest.fetchRunDateExists_(
     urlFetchApp,
     {
-      statusUrl: 'https://example.com/api/pipeline-runs',
-      ingestToken: 'secret-token'
+      mode: 'turso',
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token'
     },
     '2026-04-14'
   );
 
   assert.equal(exists, true);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'https://example.com/api/pipeline-runs/2026-04-14');
-  assert.equal(calls[0].params.method, 'get');
-  assert.equal(calls[0].params.headers['x-ingest-token'], 'secret-token');
+  assert.equal(calls[0].url, 'https://example.turso.io/v2/pipeline');
+  assert.equal(calls[0].params.method, 'post');
+  assert.equal(calls[0].params.headers.Authorization, 'Bearer secret-token');
   assert.equal(calls[0].params.muteHttpExceptions, true);
 });
 
@@ -548,7 +553,21 @@ test('fetchRunDateExists_ treats non-ready existing day as not yet complete', ()
           return 200;
         },
         getContentText() {
-          return JSON.stringify({ exists: true, normalize_status: 'pending_normalize' });
+          return JSON.stringify({
+            results: [
+              {
+                type: 'ok',
+                response: {
+                  type: 'execute',
+                  result: {
+                    cols: ['normalize_status'],
+                    rows: [[{ type: 'text', value: 'pending_normalize' }]]
+                  }
+                }
+              },
+              { type: 'ok', response: { type: 'close' } }
+            ]
+          });
         }
       };
     }
@@ -557,8 +576,9 @@ test('fetchRunDateExists_ treats non-ready existing day as not yet complete', ()
   const exists = ingest.fetchRunDateExists_(
     urlFetchApp,
     {
-      statusUrl: 'https://example.com/api/pipeline-runs',
-      ingestToken: 'secret-token'
+      mode: 'turso',
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token'
     },
     '2026-04-14'
   );
@@ -649,7 +669,7 @@ test('fetchRequestWithRetry_ retries transient 503 response and returns success'
   assert.equal(attempts, 2);
 });
 
-test('fetchRunDateExists_ retries transient 502 from ingest status endpoint', () => {
+test('fetchRunDateExists_ retries transient 502 from Turso HTTP endpoint', () => {
   let attempts = 0;
   const urlFetchApp = {
     fetch(url, params) {
@@ -670,7 +690,21 @@ test('fetchRunDateExists_ retries transient 502 from ingest status endpoint', ()
           return 200;
         },
         getContentText() {
-          return JSON.stringify({ exists: true, normalize_status: 'ready' });
+          return JSON.stringify({
+            results: [
+              {
+                type: 'ok',
+                response: {
+                  type: 'execute',
+                  result: {
+                    cols: ['normalize_status'],
+                    rows: [[{ type: 'text', value: 'ready' }]]
+                  }
+                }
+              },
+              { type: 'ok', response: { type: 'close' } }
+            ]
+          });
         }
       };
     }
@@ -679,8 +713,9 @@ test('fetchRunDateExists_ retries transient 502 from ingest status endpoint', ()
   const exists = ingest.fetchRunDateExists_(
     urlFetchApp,
     {
-      statusUrl: 'https://example.com/api/pipeline-runs',
-      ingestToken: 'secret-token'
+      mode: 'turso',
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token'
     },
     '2026-04-14'
   );
@@ -689,7 +724,7 @@ test('fetchRunDateExists_ retries transient 502 from ingest status endpoint', ()
   assert.equal(attempts, 2);
 });
 
-test('fetchRunDateExists_ degrades to false after repeated transient 503 from ingest status endpoint', () => {
+test('fetchRunDateExists_ raises after repeated transient 503 from Turso HTTP endpoint', () => {
   let attempts = 0;
   const urlFetchApp = {
     fetch() {
@@ -705,16 +740,18 @@ test('fetchRunDateExists_ degrades to false after repeated transient 503 from in
     }
   };
 
-  const exists = ingest.fetchRunDateExists_(
-    urlFetchApp,
-    {
-      statusUrl: 'https://example.com/api/pipeline-runs',
-      ingestToken: 'secret-token'
-    },
-    '2026-04-15'
+  assert.throws(
+    () => ingest.fetchRunDateExists_(
+      urlFetchApp,
+      {
+        mode: 'turso',
+        pipelineUrl: 'https://example.turso.io/v2/pipeline',
+        authToken: 'secret-token'
+      },
+      '2026-04-15'
+    ),
+    /Run date existence check failed with HTTP 503/
   );
-
-  assert.equal(exists, false);
   assert.equal(attempts, 3);
 });
 
@@ -726,10 +763,10 @@ test('buildRunContext_ loads timezone, topics, and ingest settings once', () => 
   ];
   const scriptProperties = {
     getProperty(name) {
-      if (name === 'INGEST_BASE_URL') {
-        return 'https://example.com/ingest-service';
+      if (name === 'TURSO_DATABASE_URL') {
+        return 'libsql://example.turso.io';
       }
-      if (name === 'INGEST_TOKEN') {
+      if (name === 'TURSO_AUTH_TOKEN') {
         return 'secret-token';
       }
       return '';
@@ -800,21 +837,78 @@ test('buildRunContext_ loads timezone, topics, and ingest settings once', () => 
       }
     ],
     settings: {
-      functionUrl: 'https://example.com/ingest-service/ingest',
-      resetUrl: 'https://example.com/ingest-service/reset',
-      ingestToken: 'secret-token'
+      mode: 'turso',
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token'
     },
     verboseLogging: false
   });
 });
 
-test('getBackfillSettings_ uses generic ingest status url when ingest base url is configured', () => {
+test('buildRunContext_ prefers direct Turso settings when script properties are configured', () => {
+  const values = [
+    ['Тема письма', 'Конверсии'],
+    ['_SenSoy_', '']
+  ];
   const scriptProperties = {
     getProperty(name) {
-      if (name === 'INGEST_BASE_URL') {
-        return 'https://example.com/ingest-service';
+      if (name === 'TURSO_DATABASE_URL') {
+        return 'libsql://example.turso.io';
       }
-      if (name === 'INGEST_TOKEN') {
+      if (name === 'TURSO_AUTH_TOKEN') {
+        return 'secret-token';
+      }
+      return '';
+    }
+  };
+  const runtime = {
+    Session: {
+      getScriptTimeZone() {
+        return 'Asia/Tbilisi';
+      }
+    },
+    SpreadsheetApp: {
+      openById() {
+        return {
+          getSheetByName() {
+            return {
+              getLastRow() {
+                return values.length;
+              },
+              getRange() {
+                return {
+                  getDisplayValues() {
+                    return values.slice(1);
+                  }
+                };
+              }
+            };
+          }
+        };
+      }
+    },
+    PropertiesService: {
+      getScriptProperties() {
+        return scriptProperties;
+      }
+    }
+  };
+
+  const context = ingest.buildRunContext_(runtime);
+  assert.deepEqual(context.settings, {
+    mode: 'turso',
+    pipelineUrl: 'https://example.turso.io/v2/pipeline',
+    authToken: 'secret-token'
+  });
+});
+
+test('getBackfillSettings_ uses direct Turso settings for status checks', () => {
+  const scriptProperties = {
+    getProperty(name) {
+      if (name === 'TURSO_DATABASE_URL') {
+        return 'libsql://example.turso.io';
+      }
+      if (name === 'TURSO_AUTH_TOKEN') {
         return 'secret-token';
       }
       return '';
@@ -828,45 +922,298 @@ test('getBackfillSettings_ uses generic ingest status url when ingest base url i
       }
     }),
     {
-      statusUrl: 'https://example.com/ingest-service/pipeline-runs',
-      ingestToken: 'secret-token',
-      restUrl: '',
-      serviceRoleKey: '',
-      skipExistingEnabled: true
+      mode: 'turso',
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token',
+      skipExistingEnabled: false
     }
   );
 });
 
-test('getBackfillSettings_ normalizes explicit INGEST_STATUS_URL base to pipeline-runs endpoint', () => {
-  const scriptProperties = {
-    getProperty(name) {
-      if (name === 'INGEST_BASE_URL') {
-        return 'https://example.com/ingest-service';
+test('runForDate_ writes raw attachments directly to Turso without default reset', () => {
+  const fetchCalls = [];
+  const attachmentBlob = {
+    getBytes() {
+      return [65, 66, 67];
+    }
+  };
+  const attachment = {
+    getName() {
+      return 'report.csv';
+    },
+    getContentType() {
+      return 'text/csv';
+    },
+    copyBlob() {
+      return attachmentBlob;
+    }
+  };
+  const runtime = {
+    UrlFetchApp: {
+      fetch(url, params) {
+        fetchCalls.push({ url, params });
+        return {
+          getResponseCode() {
+            return 200;
+          },
+          getContentText() {
+            return JSON.stringify({
+              results: [
+                {
+                  type: 'ok',
+                  response: {
+                    type: 'execute',
+                    result: {
+                      cols: [],
+                      rows: [],
+                      affected_row_count: 1,
+                      rows_read: 0,
+                      rows_written: 1
+                    }
+                  }
+                },
+                {
+                  type: 'ok',
+                  response: {
+                    type: 'close'
+                  }
+                }
+              ]
+            });
+          }
+        };
       }
-      if (name === 'INGEST_STATUS_URL') {
-        return 'https://status.example.com/root';
-      }
-      if (name === 'INGEST_TOKEN') {
-        return 'secret-token';
-      }
-      return '';
+    }
+  };
+  const runContext = {
+    timeZone: 'Asia/Tbilisi',
+    topicRules: [{ raw: '_SenSoy_' }],
+    verboseLogging: false,
+    settings: {
+      mode: 'turso',
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token'
     }
   };
 
-  assert.deepEqual(
-    ingest.getBackfillSettings_({
-      getScriptProperties() {
-        return scriptProperties;
-      }
-    }),
+  const result = ingest.runForDate_(
+    runtime,
+    '2026-04-14',
+    0,
+    runContext,
     {
-      statusUrl: 'https://status.example.com/root/pipeline-runs',
-      ingestToken: 'secret-token',
-      restUrl: '',
-      serviceRoleKey: '',
-      skipExistingEnabled: true
+      query: 'newer_than:3d has:attachment',
+      preloadedThreadsCount: 1,
+      preloadedCandidates: [
+        {
+          primaryTopic: '_SenSoy_',
+          matchedTopic: '_SenSoy_',
+          topicRole: 'primary',
+          subject: 'Отчёт «_SenSoy_» за 14.04.2026',
+          messageDate: new Date('2026-04-14T09:00:00Z'),
+          messageId: 'msg-1',
+          threadId: 'thr-1',
+          message: {
+            getAttachments() {
+              return [attachment];
+            }
+          }
+        }
+      ]
     }
   );
+
+  assert.equal(result.attachmentsSeen, 1);
+  assert.equal(result.attachmentsSent, 1);
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, 'https://example.turso.io/v2/pipeline');
+  assert.equal(fetchCalls[0].params.headers.Authorization, 'Bearer secret-token');
+  assert.equal(fetchCalls[0].params.headers['x-ingest-token'], undefined);
+  const ingestPayload = JSON.parse(fetchCalls[0].params.payload);
+  assert.match(
+    ingestPayload.requests.map((request) => request.stmt && request.stmt.sql).join('\n'),
+    /insert into ingest_files/i
+  );
+  assert.match(
+    ingestPayload.requests.map((request) => request.stmt && request.stmt.sql).join('\n'),
+    /insert into ingest_file_payloads/i
+  );
+  assert.doesNotMatch(
+    ingestPayload.requests.map((request) => request.stmt && request.stmt.sql).join('\n'),
+    /delete from ingest_file_payloads|delete from ingest_rows|delete from ingest_files/i
+  );
+});
+
+test('runForDate_ uploads attachments from all matching messages in the window, not only the latest one', () => {
+  const fetchCalls = [];
+  const attachmentA = {
+    getName() {
+      return 'older.csv';
+    },
+    getContentType() {
+      return 'text/csv';
+    },
+    copyBlob() {
+      return {
+        getBytes() {
+          return [65, 65, 65];
+        }
+      };
+    }
+  };
+  const attachmentB = {
+    getName() {
+      return 'newer.csv';
+    },
+    getContentType() {
+      return 'text/csv';
+    },
+    copyBlob() {
+      return {
+        getBytes() {
+          return [66, 66, 66];
+        }
+      };
+    }
+  };
+  const runtime = {
+    UrlFetchApp: {
+      fetch(url, params) {
+        fetchCalls.push({ url, params });
+        return {
+          getResponseCode() {
+            return 200;
+          },
+          getContentText() {
+            return JSON.stringify({
+              results: [
+                {
+                  type: 'ok',
+                  response: {
+                    type: 'execute',
+                    result: {
+                      cols: [],
+                      rows: [],
+                      affected_row_count: 1,
+                      rows_read: 0,
+                      rows_written: 1
+                    }
+                  }
+                },
+                { type: 'ok', response: { type: 'close' } }
+              ]
+            });
+          }
+        };
+      }
+    }
+  };
+  const runContext = {
+    timeZone: 'Asia/Tbilisi',
+    topicRules: [{ raw: '_SenSoy_' }],
+    verboseLogging: false,
+    settings: {
+      mode: 'turso',
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token'
+    }
+  };
+
+  const result = ingest.runForDate_(
+    runtime,
+    '2026-04-14',
+    0,
+    runContext,
+    {
+      query: 'newer_than:3d has:attachment',
+      preloadedThreadsCount: 1,
+      preloadedCandidates: [
+        {
+          primaryTopic: '_SenSoy_',
+          matchedTopic: '_SenSoy_',
+          topicRole: 'primary',
+          subject: 'Отчёт «_SenSoy_» за 14.04.2026',
+          messageDate: new Date('2026-04-14T09:00:00Z'),
+          messageId: 'msg-older',
+          threadId: 'thr-1',
+          message: {
+            getAttachments() {
+              return [attachmentA];
+            }
+          }
+        },
+        {
+          primaryTopic: '_SenSoy_',
+          matchedTopic: '_SenSoy_',
+          topicRole: 'primary',
+          subject: 'Отчёт «_SenSoy_» за 14.04.2026 повтор',
+          messageDate: new Date('2026-04-14T10:00:00Z'),
+          messageId: 'msg-newer',
+          threadId: 'thr-1',
+          message: {
+            getAttachments() {
+              return [attachmentB];
+            }
+          }
+        }
+      ]
+    }
+  );
+
+  assert.equal(result.matchedMessagesBeforeLatestFilter, 2);
+  assert.equal(result.matchedMessages, 2);
+  assert.equal(result.attachmentsSeen, 2);
+  assert.equal(result.attachmentsSent, 2);
+  assert.equal(fetchCalls.length, 2);
+});
+
+test('buildAttachmentRequest_ uses stable content-based identity and upsert semantics', () => {
+  const attachment = {
+    getContentType() {
+      return 'text/csv';
+    },
+    copyBlob() {
+      return {
+        getBytes() {
+          return [65, 66, 67];
+        }
+      };
+    }
+  };
+
+  const request = ingest.buildAttachmentRequest_(
+    {
+      mode: 'turso',
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token'
+    },
+    attachment,
+    {
+      run_date: '2026-04-06',
+      primary_topic: 'weekly report',
+      matched_topic: 'weekly report',
+      topic_role: 'primary',
+      message_subject: 'Weekly report for Solta',
+      message_date: '2026-04-06T09:30:00.000Z',
+      message_id: 'msg-1',
+      thread_id: 'thr-1',
+      attachment_name: 'client.xlsx',
+      attachment_type: 'csv',
+      action: 'ingest'
+    }
+  );
+
+  const payload = JSON.parse(request.payload);
+  const allSql = payload.requests.map((item) => item.stmt && item.stmt.sql).filter(Boolean).join('\n');
+  const insertStmt = payload.requests[1].stmt;
+  const args = insertStmt.args || [];
+
+  assert.match(allSql, /raw_file_key/i);
+  assert.match(allSql, /file_hash/i);
+  assert.match(allSql, /on conflict/i);
+  assert.match(allSql, /raw_only/i);
+  assert.equal(args[0].value, args[1].value);
+  assert.match(args[2].value, /^[a-f0-9]{64}$/i);
 });
 
 test('chunkItems_ splits work into stable batches', () => {
@@ -890,7 +1237,7 @@ test('resolveSettingValue_ prefers script property over fallback', () => {
   );
 });
 
-test('buildRunContext_ requires INGEST_TOKEN from script properties', () => {
+test('buildRunContext_ requires TURSO_DATABASE_URL from script properties', () => {
   const runtime = {
     Session: {
       getScriptTimeZone() {
@@ -930,6 +1277,6 @@ test('buildRunContext_ requires INGEST_TOKEN from script properties', () => {
 
   assert.throws(
     () => ingest.buildRunContext_(runtime),
-    /Missing script property "INGEST_TOKEN"/
+    /Missing script property "TURSO_DATABASE_URL"/
   );
 });

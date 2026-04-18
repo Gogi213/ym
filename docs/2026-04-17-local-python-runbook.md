@@ -4,70 +4,58 @@
 
 Рабочий контур сейчас такой:
 
-1. Apps Script отправляет raw ingest в настроенный endpoint.
+1. Apps Script пишет raw ingest прямо в Turso.
 2. Raw слой сохраняется в облачной БД.
 3. Локальный Python запускает normalize и sheet sync.
 
-## Step 1: Start local ingest service
+## Step 1: Configure Apps Script direct Turso access
 
-```powershell
-$env:INGEST_TOKEN='<ingest-token>'
-$env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
-$env:TURSO_AUTH_TOKEN='<db-token>'
-uvicorn ingest_service.main:app --host 0.0.0.0 --port 8000
-```
+Apps Script primary properties now are:
 
-## Step 1b: Expose local ingest for Apps Script
+- `TURSO_DATABASE_URL`
+- `TURSO_AUTH_TOKEN`
 
-Если Apps Script должен ходить в локальный ingest service, нужен публичный URL. Самый короткий рабочий путь:
-
-```powershell
-cloudflared tunnel --url http://127.0.0.1:8000 --no-autoupdate
-```
-
-Команда отдаст временный URL вида:
-
-- `https://<random>.trycloudflare.com`
-
-Именно этот URL нужно использовать для:
-
-- `INGEST_BASE_URL`
-- optional `INGEST_STATUS_URL`
+Это единственный поддерживаемый Apps Script transport.
 
 ## Step 2: Run Apps Script ingest
-
-Apps Script должен знать:
-
-- `INGEST_BASE_URL`
-- `INGEST_TOKEN`
-- optional `INGEST_STATUS_URL`
 
 Обычные entrypoints:
 
 - `run()`
 - `runMonthBackfill()`
 
-## Step 3: Run local Python pipeline
+После этого в Turso появляются raw files/payloads со статусом `raw_only`.
 
-После того как raw уже долетел в облачную БД:
+## Step 3: Run local Python post-processing
 
 ```powershell
 python scripts\run_pipeline.py --service-account-json key\service-account.json
 ```
 
-Это делает:
+Теперь это основной локальный шаг после Apps Script.
+`run_pipeline.py` сам дочитает `raw_only` payload из Turso, распарсит `csv/xlsx`, заполнит `ingest_rows`, затем прогонит normalize и sheet sync.
 
-- normalize dirty `run_date`
-- sync `отчеты`
-- sync `union`
-- sync `pipeline_status`
+## Step 2.5: Optional doctor / smoke check
 
-## One-day fallback
+Если нужно быстро понять, что именно Apps Script уже положил в Turso, не трогая данные:
+
+```powershell
+npm run doctor:turso -- --run-date YYYY-MM-DD --validate-payloads
+```
+
+Это read-only проверка. Она:
+
+- проверит реальное подключение к Turso;
+- покажет свежие `pipeline_runs`;
+- покажет summary по выбранному `run_date`;
+- проверит, что `raw_only` payload вообще парсится как ожидаемый `csv/xlsx`.
+
+## One-day normalize
 
 Если нужен только один день:
 
 ```powershell
-python scripts\normalize_supabase.py --run-date YYYY-MM-DD
+python scripts\normalize_one_run.py --run-date YYYY-MM-DD
 ```
 
 ## Notes
@@ -75,5 +63,4 @@ python scripts\normalize_supabase.py --run-date YYYY-MM-DD
 - Apps Script заканчивает работу на raw ingest.
 - `run_pipeline.py` — supported local post-processing entrypoint.
 - `pipeline_runs` — operational truth for day status.
-- Локальный `127.0.0.1` недоступен из Google напрямую. Без туннеля или другого публичного URL Apps Script в локальный ingest не попадёт.
-- `cloudflared` quick tunnel — временный operational bridge, а не новый supported hosted runtime.
+- Apps Script больше не использует локальный HTTP contour.

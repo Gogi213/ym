@@ -32,13 +32,13 @@ class NormalizeTursoLayoutTests(unittest.TestCase):
         connection.executescript(
             """
             insert into ingest_files (
-              id, run_date, message_id, thread_id, message_date, message_subject,
+              id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject,
               primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
               status, header_json, row_count, error_text
             ) values
-              ('f2', '2026-04-14', 'm2', 't2', '2026-04-14T10:00:00Z', 's2', 'B Topic', 'B Topic', 'secondary', 'b.csv', 'csv', 'ingested', '["UTM Source","Goal"]', 1, null),
-              ('f1', '2026-04-14', 'm1', 't1', '2026-04-14T09:00:00Z', 's1', 'A Topic', 'A Topic', 'primary', 'a.csv', 'csv', 'ingested', '["UTM Source","Visits"]', 2, null),
-              ('f3', '2026-04-14', 'm3', 't3', '2026-04-14T11:00:00Z', 's3', 'C Topic', 'C Topic', 'primary', 'c.csv', 'csv', 'skipped', '[]', 0, null);
+              ('f2', 'rk-f2', 'hash-f2', '2026-04-14', 'm2', 't2', '2026-04-14T10:00:00Z', 's2', 'B Topic', 'B Topic', 'secondary', 'b.csv', 'csv', 'ingested', '["UTM Source","Goal"]', 1, null),
+              ('f1', 'rk-f1', 'hash-f1', '2026-04-14', 'm1', 't1', '2026-04-14T09:00:00Z', 's1', 'A Topic', 'A Topic', 'primary', 'a.csv', 'csv', 'ingested', '["UTM Source","Visits"]', 2, null),
+              ('f3', 'rk-f3', 'hash-f3', '2026-04-14', 'm3', 't3', '2026-04-14T11:00:00Z', 's3', 'C Topic', 'C Topic', 'primary', 'c.csv', 'csv', 'skipped', '[]', 0, null);
             """
         )
         connection.commit()
@@ -105,6 +105,102 @@ class NormalizeTursoLayoutTests(unittest.TestCase):
         self.assertEqual(mapping["Topic A"]["Goal A1"], 1)
         self.assertEqual(mapping["Topic A"]["Goal A2"], 2)
         self.assertEqual(mapping["Topic B"]["Goal B1"], 1)
+
+    def test_prepare_raw_ingest_files_parses_raw_only_payloads(self):
+        from scripts.normalize.pipeline import prepare_raw_ingest_files
+
+        connection = build_bootstrap_connection()
+        connection.executescript(
+            """
+            insert into pipeline_runs (
+              run_date, raw_revision, normalize_status, raw_files, raw_rows,
+              normalized_files, normalized_rows, last_ingest_at, normalized_at,
+              last_error, updated_at
+            ) values (
+              '2026-04-14', 1, 'pending_normalize', 1, 0, 0, 0,
+              '2026-04-14T09:00:00Z', null, null, '2026-04-14T09:00:00Z'
+            );
+            insert into ingest_files (
+              id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject,
+              primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
+              status, header_json, row_count, error_text
+            ) values (
+              'file-1', 'rk-file-1', 'hash-file-1', '2026-04-14', 'm1', 't1', '2026-04-14T10:00:00Z', 's1',
+              'Topic A', 'Topic A', 'primary', 'a.csv', 'csv', 'raw_only', '[]', 0, null
+            );
+            insert into ingest_file_payloads (file_id, content_type, file_size_bytes, file_base64)
+            values ('file-1', 'text/csv', 53, 'VVRNIFNvdXJjZTtVVE0gQ2FtcGFpZ2470JLQuNC30LjRgtGLCmdvb2dsZTticmFuZDsxMAo=');
+            """
+        )
+        connection.commit()
+
+        prepared = prepare_raw_ingest_files(connection, "2026-04-14")
+
+        row = connection.execute(
+            "select status, header_json, row_count, error_text from ingest_files where id = 'file-1'"
+        ).fetchone()
+        raw_rows = connection.execute(
+            "select row_index, row_json from ingest_rows where file_id = 'file-1' order by row_index"
+        ).fetchall()
+        pipeline = connection.execute(
+            "select raw_files, raw_rows, normalize_status from pipeline_runs where run_date = '2026-04-14'"
+        ).fetchone()
+
+        self.assertEqual(prepared, {"prepared_files": 1, "ingested_files": 1, "skipped_files": 0, "error_files": 0})
+        self.assertEqual(dict(row), {
+            "status": "ingested",
+            "header_json": '["UTM Source", "UTM Campaign", "Визиты"]',
+            "row_count": 1,
+            "error_text": None,
+        })
+        self.assertEqual([(item["row_index"], item["row_json"]) for item in raw_rows], [(1, '{"UTM Source": "google", "UTM Campaign": "brand", "Визиты": "10"}')])
+        self.assertEqual(dict(pipeline), {"raw_files": 1, "raw_rows": 1, "normalize_status": "pending_normalize"})
+
+    def test_prepare_raw_ingest_files_parses_legacy_placeholder_ingested_file(self):
+        from scripts.normalize.pipeline import prepare_raw_ingest_files
+
+        connection = build_bootstrap_connection()
+        connection.executescript(
+            """
+            insert into pipeline_runs (
+              run_date, raw_revision, normalize_status, raw_files, raw_rows,
+              normalized_files, normalized_rows, last_ingest_at, normalized_at,
+              last_error, updated_at
+            ) values (
+              '2026-04-15', 1, 'pending_normalize', 1, 0, 0, 0,
+              '2026-04-15T09:00:00Z', null, null, '2026-04-15T09:00:00Z'
+            );
+            insert into ingest_files (
+              id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject,
+              primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
+              status, header_json, row_count, error_text
+            ) values (
+              'file-legacy', 'rk-file-legacy', 'hash-file-legacy', '2026-04-15', 'm1', 't1', '2026-04-15T10:00:00Z', 's1',
+              'Topic A', 'Topic A', 'primary', 'legacy.csv', 'csv', 'ingested', '[]', 0, null
+            );
+            insert into ingest_file_payloads (file_id, content_type, file_size_bytes, file_base64)
+            values ('file-legacy', 'text/csv', 53, 'VVRNIFNvdXJjZTtVVE0gQ2FtcGFpZ2470JLQuNC30LjRgtGLCmdvb2dsZTticmFuZDsxMAo=');
+            """
+        )
+        connection.commit()
+
+        prepared = prepare_raw_ingest_files(connection, "2026-04-15")
+
+        row = connection.execute(
+            "select status, header_json, row_count, error_text from ingest_files where id = 'file-legacy'"
+        ).fetchone()
+        raw_rows = connection.execute(
+            "select row_index, row_json from ingest_rows where file_id = 'file-legacy' order by row_index"
+        ).fetchall()
+
+        self.assertEqual(prepared, {"prepared_files": 1, "ingested_files": 1, "skipped_files": 0, "error_files": 0})
+        self.assertEqual(dict(row), {
+            "status": "ingested",
+            "header_json": '["UTM Source", "UTM Campaign", "Визиты"]',
+            "row_count": 1,
+            "error_text": None,
+        })
+        self.assertEqual([(item["row_index"], item["row_json"]) for item in raw_rows], [(1, '{"UTM Source": "google", "UTM Campaign": "brand", "Визиты": "10"}')])
 
 
 if __name__ == "__main__":

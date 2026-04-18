@@ -5,13 +5,11 @@ const vm = require('node:vm');
 const EXPORT_NAMES = [
   'buildAttachmentMetadata_',
   'buildAttachmentRequest_',
-  'buildIngestStatusRequest_',
+  'buildTursoPipelineRequest_',
   'fetchRequestWithRetry_',
   'fetchRunDateExists_',
-  'normalizeIngestStatusBaseUrl_',
   'buildRunContext_',
   'buildResetPayload_',
-  'buildSupabaseSelectRequest_',
   'buildCandidatesByRunDate_',
   'chunkItems_',
   'compactText_',
@@ -32,6 +30,7 @@ const EXPORT_NAMES = [
   'resolveSettingValue_',
   'resolveTargetRunDate_',
   'run',
+  'runForDate_',
   'runMonthBackfill',
   'subjectMatchesTopics_',
   'tokenizeTopic_'
@@ -45,6 +44,7 @@ const exportCode = '\n;globalThis.__test_exports__ = {' +
 
 const context = {
   console,
+  crypto: require('node:crypto'),
   Date,
   Intl,
   JSON,
@@ -52,7 +52,8 @@ const context = {
   String,
   Number,
   Boolean,
-  RegExp
+  RegExp,
+  Buffer
 };
 
 vm.runInNewContext(source + exportCode, context, { filename: 'Code.js' });

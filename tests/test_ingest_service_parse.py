@@ -30,9 +30,9 @@ def build_xlsx_bytes(sheet_xml: str) -> bytes:
     return buffer.getvalue()
 
 
-class IngestServiceParseTests(unittest.TestCase):
+class RawParseTests(unittest.TestCase):
     def test_parse_attachment_detects_csv_table_block(self):
-        from ingest_service.parse import parse_attachment
+        from scripts.normalize.raw_parse import parse_attachment
 
         payload = (
             "мусор;заголовок\n"
@@ -49,7 +49,7 @@ class IngestServiceParseTests(unittest.TestCase):
         self.assertEqual(parsed.debug.type, "csv")
 
     def test_parse_attachment_detects_xlsx_table_block(self):
-        from ingest_service.parse import parse_attachment
+        from scripts.normalize.raw_parse import parse_attachment
 
         sheet_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -81,7 +81,7 @@ class IngestServiceParseTests(unittest.TestCase):
         self.assertEqual(parsed.debug.type, "xlsx")
 
     def test_parse_attachment_returns_null_table_when_no_utm_header(self):
-        from ingest_service.parse import parse_attachment
+        from scripts.normalize.raw_parse import parse_attachment
 
         payload = "a,b,c\n1,2,3\n".encode("utf-8")
         parsed = parse_attachment("csv", payload)

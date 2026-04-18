@@ -6,30 +6,37 @@ Pipeline for loading Gmail report attachments from Apps Script into a cloud data
 
 Current supported operating model:
 
-- `Apps Script -> configured ingest endpoint -> Turso/libSQL`
+- `Apps Script -> Turso/libSQL raw layer`
 - `local Python -> normalize + operator sheet sync`
+
+Business-critical ingest semantics:
+
+- Apps Script scans the full sync window, not just the latest message per topic.
+- raw files are deduped by stable content-based identity before they hit Turso.
+- default ingest no longer does destructive day reset.
+- `pipeline_runs` is a day summary, not the primary raw identity.
 
 What this repo supports directly:
 
 - Apps Script source and bundle generation
-- local Python ingest service
+- direct Apps Script raw writes into Turso/libSQL
 - Turso/libSQL bootstrap and runtime
 - local Python normalize/sync scripts
 
 What this repo does **not** maintain anymore:
 
-- hosted deployment target for the ingest service
+- hosted HTTP ingest target
 - Docker/container deployment path
-- abandoned hosted-runtime experiments
+- Supabase/HTTP fallback runtime
 
 ## Repository Layout
 
 - [Code.js](./Code.js): deployable Apps Script bundle
 - [appsscript-src](./appsscript-src): source of truth for Apps Script code
-- [ingest_service](./ingest_service): local Python HTTP ingest service
-- [scripts/normalize_supabase.py](./scripts/normalize_supabase.py): normalizer CLI facade
+- [scripts/normalize_one_run.py](./scripts/normalize_one_run.py): one-run local normalize CLI
 - [scripts/normalize](./scripts/normalize): modular normalizer package
 - [scripts/run_pipeline.py](./scripts/run_pipeline.py): local orchestration entrypoint
+- [scripts/doctor_direct_turso.py](./scripts/doctor_direct_turso.py): read-only doctor/smoke for the direct Turso contour
 - [scripts/sync_goal_mapping_sheet.py](./scripts/sync_goal_mapping_sheet.py): sync `отчеты`
 - [scripts/sync_export_rows_wide_sheet.py](./scripts/sync_export_rows_wide_sheet.py): sync `union`
 - [scripts/sync_pipeline_status_sheet.py](./scripts/sync_pipeline_status_sheet.py): sync `pipeline_status`
@@ -41,7 +48,7 @@ What this repo does **not** maintain anymore:
 ## Current Data Flow
 
 1. Apps Script reads topic bindings from spreadsheet `17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA`, sheet `отчеты`.
-2. Apps Script finds matching Gmail messages and uploads `xlsx/csv` attachments to the configured ingest endpoint.
+2. Apps Script scans matching Gmail messages in the sync window and writes idempotent raw `xlsx/csv` attachments into Turso/libSQL.
 3. Raw layer is written into Turso/libSQL.
 4. Local Python normalizer builds canonical fact tables and operator cache.
 5. Local Python sync scripts write `отчеты`, `union`, and `pipeline_status` back to Google Sheets.
@@ -57,12 +64,17 @@ python scripts\build_appsscript_bundle.py
 ```
 
 Transport config used by Apps Script:
-- `INGEST_BASE_URL`
-- `INGEST_TOKEN`
-- optional `INGEST_STATUS_URL`
+- `TURSO_DATABASE_URL`
+- `TURSO_AUTH_TOKEN`
 
-Apps Script logic remains generic. This repo no longer documents a built-in hosted runtime target. If Apps Script must reach an external endpoint, that exposure is handled outside the repo.
-For local-only operation, the practical bridge is a temporary tunnel from the local ingest service to a public URL.
+Apps Script now uses only direct SQL-over-HTTP writes into Turso.
+
+Direct raw ingest contract:
+
+- one raw row per stable `raw_file_key`
+- content hash stored in `file_hash`
+- duplicate payloads within the same topic/day stream are upserted, not duplicated
+- `runMonthBackfill()` defaults to re-scanning the month window instead of skipping already-ready days
 
 ## Local Python Commands
 
@@ -85,38 +97,24 @@ Check Apps Script bundle syntax:
 node --check Code.js
 ```
 
+Run read-only doctor for the direct Turso contour:
+
+```powershell
+npm run doctor:turso -- --run-date YYYY-MM-DD --validate-payloads
+```
+
 Bootstrap Turso schema:
 
 ```powershell
-$env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
-$env:TURSO_AUTH_TOKEN='<db-token>'
 python scripts\bootstrap_turso.py
 ```
 
-Run local ingest service:
-
-```powershell
-$env:INGEST_TOKEN='<ingest-token>'
-$env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
-$env:TURSO_AUTH_TOKEN='<db-token>'
-uvicorn ingest_service.main:app --host 0.0.0.0 --port 8000
-```
-
-Optional: expose the local ingest service for Apps Script with a temporary Cloudflare quick tunnel:
-
-```powershell
-cloudflared tunnel --url http://127.0.0.1:8000 --no-autoupdate
-```
-
-Then use the emitted `https://<random>.trycloudflare.com` value for:
-
-- `INGEST_BASE_URL`
-- `INGEST_STATUS_URL`
+If `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are not set, the Turso runtime will also try to load the active database URL and DB token from the local Turso CLI cache at `%APPDATA%\turso\settings.json`.
 
 Run one-day normalize:
 
 ```powershell
-python scripts\normalize_supabase.py --run-date 2026-04-11
+python scripts\normalize_one_run.py --run-date 2026-04-11
 ```
 
 Run full local post-ingest pipeline:
@@ -124,6 +122,8 @@ Run full local post-ingest pipeline:
 ```powershell
 python scripts\run_pipeline.py --service-account-json key\service-account.json
 ```
+
+This is now the primary local step after direct Apps Script -> Turso ingest.
 
 ## Performance Notes
 

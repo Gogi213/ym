@@ -19,12 +19,12 @@ class NormalizeTursoWritePathTests(unittest.TestCase):
         connection.executescript(
             """
             insert into ingest_files (
-              id, run_date, message_id, thread_id, message_date, message_subject,
+              id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject,
               primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
               status, header_json, row_count, error_text
             ) values
-              ('file-a', '2026-04-14', 'm1', 't1', '2026-04-14T10:00:00Z', 's1', 'Topic A', 'Topic A', 'primary', 'a.csv', 'csv', 'ingested', '[]', 2, null),
-              ('file-b', '2026-04-13', 'm2', 't2', '2026-04-13T10:00:00Z', 's2', 'Topic B', 'Topic B', 'primary', 'b.csv', 'csv', 'ingested', '[]', 1, null);
+              ('file-a', 'rk-file-a', 'hash-file-a', '2026-04-14', 'm1', 't1', '2026-04-14T10:00:00Z', 's1', 'Topic A', 'Topic A', 'primary', 'a.csv', 'csv', 'ingested', '[]', 2, null),
+              ('file-b', 'rk-file-b', 'hash-file-b', '2026-04-13', 'm2', 't2', '2026-04-13T10:00:00Z', 's2', 'Topic B', 'Topic B', 'primary', 'b.csv', 'csv', 'ingested', '[]', 1, null);
             insert into fact_rows (
               fact_row_id, topic, source_file_id, source_row_index, report_date, report_date_from,
               report_date_to, message_date, layout_signature, row_hash, is_current, source_row_json
@@ -129,12 +129,12 @@ class NormalizeTursoWritePathTests(unittest.TestCase):
         connection.execute(
             """
             insert into ingest_files (
-              id, run_date, message_id, thread_id, message_date, message_subject,
+              id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject,
               primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
               status, header_json, row_count, error_text
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("file-a", "2026-04-14", "m1", "t1", "2026-04-14T10:00:00Z", "s1", "Topic A", "Topic A", "primary", "a.csv", "csv", "ingested", "[]", 2, None),
+            ("file-a", "rk-file-a", "hash-file-a", "2026-04-14", "m1", "t1", "2026-04-14T10:00:00Z", "s1", "Topic A", "Topic A", "primary", "a.csv", "csv", "ingested", "[]", 2, None),
         )
 
         insert_fact_rows(
@@ -198,12 +198,12 @@ class NormalizeTursoWritePathTests(unittest.TestCase):
         connection.execute(
             """
             insert into ingest_files (
-              id, run_date, message_id, thread_id, message_date, message_subject,
+              id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject,
               primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
               status, header_json, row_count, error_text
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("file-a", "2026-04-14", "m1", "t1", "2026-04-14T10:00:00Z", "s1", "Topic A", "Topic A", "primary", "a.csv", "csv", "ingested", "[]", 2, None),
+            ("file-a", "rk-file-a", "hash-file-a", "2026-04-14", "m1", "t1", "2026-04-14T10:00:00Z", "s1", "Topic A", "Topic A", "primary", "a.csv", "csv", "ingested", "[]", 2, None),
         )
         insert_fact_rows(
             connection,

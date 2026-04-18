@@ -32,8 +32,7 @@ function runForDate_(runtime, runDate, startedAtMs, runContext, options) {
   const allCandidates = runOptions.preloadedCandidates
     ? runOptions.preloadedCandidates.slice()
     : collectCandidateMessages_(threads, topicRules, runDate, timeZone);
-  const candidates = markLatestMessagesByTopic_(allCandidates)
-    .filter((candidate) => candidate.isLatestForTopic);
+  const candidates = allCandidates.slice();
 
   const stats = {
     runDate,
@@ -63,14 +62,6 @@ function runForDate_(runtime, runDate, startedAtMs, runContext, options) {
     candidatesSelectedPayload.candidateSubjects = candidates.map((candidate) => candidate.subject);
   }
   logProgress_('candidates_selected', candidatesSelectedPayload);
-
-  const resetResponse = postReset_(runtime.UrlFetchApp, settings, runDate);
-  stats.resetResponse = resetResponse.json || resetResponse.body;
-  logProgress_('reset_complete', {
-    runDate,
-    resetResponse: stats.resetResponse,
-    elapsedMs: elapsedMs_(startedAtMs)
-  });
 
   const attachmentRequests = [];
   const unsupportedAttachments = [];
@@ -137,7 +128,7 @@ function runForDate_(runtime, runDate, startedAtMs, runContext, options) {
         maxAttempts: 3,
         retryableStatuses: [502, 503, 504]
       });
-      assertSuccessfulResponse_(response, 'Attachment ingest');
+      assertSuccessfulIngestResponse_(settings, response, 'Attachment ingest');
       stats.attachmentsSent++;
     }
 
@@ -197,13 +188,6 @@ function runMonthBackfill() {
     skipExistingEnabled: backfillSettings.skipExistingEnabled,
     elapsedMs: elapsedMs_(startedAtMs)
   });
-
-  if (!backfillSettings.skipExistingEnabled) {
-    logProgress_('month_backfill_skip_check_disabled', {
-      reason: 'SUPABASE_SERVICE_ROLE_KEY is not configured',
-      elapsedMs: elapsedMs_(startedAtMs)
-    });
-  }
 
   for (let i = 0; i < runDates.length; i++) {
     const runDate = runDates[i];

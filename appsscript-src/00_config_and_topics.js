@@ -3,15 +3,9 @@ const CONFIG_ = {
   sourceSheetName: 'отчеты',
   sourceColumn: 1,
   sourceSecondaryColumn: 2,
-  ingestBaseUrlProperty: 'INGEST_BASE_URL',
-  ingestTokenProperty: 'INGEST_TOKEN',
-  ingestStatusUrlProperty: 'INGEST_STATUS_URL',
-  supabaseFunctionUrlProperty: 'SUPABASE_FUNCTION_URL',
-  supabaseIngestTokenProperty: 'SUPABASE_INGEST_TOKEN',
-  supabaseRestUrlProperty: 'SUPABASE_REST_URL',
-  supabaseServiceRoleKeyProperty: 'SUPABASE_SERVICE_ROLE_KEY',
+  tursoDatabaseUrlProperty: 'TURSO_DATABASE_URL',
+  tursoAuthTokenProperty: 'TURSO_AUTH_TOKEN',
   verboseLoggingProperty: 'VERBOSE_LOGGING',
-  supabaseFunctionUrl: 'https://jchvqvuudclgodsrhctb.supabase.co/functions/v1/mail-ingest',
   runDayOffset: -1,
   searchBatchSize: 100
 };

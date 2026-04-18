@@ -29,26 +29,8 @@ Role:
 
 - reads topic bindings from spreadsheet `отчеты`
 - scans Gmail
-- uploads matched `xlsx/csv` files to the configured ingest endpoint
+- writes matched `xlsx/csv` raw payloads directly into Turso when `TURSO_*` script properties are set
 - does **not** normalize, aggregate, or sync operator views
-
-### Local Python ingest service
-
-Files:
-
-- [ingest_service/main.py](/C:/visual%20projects/ym/ingest_service/main.py)
-- [ingest_service/handlers.py](/C:/visual%20projects/ym/ingest_service/handlers.py)
-- [ingest_service/storage.py](/C:/visual%20projects/ym/ingest_service/storage.py)
-- [ingest_service/parse.py](/C:/visual%20projects/ym/ingest_service/parse.py)
-
-Role:
-
-- exposes:
-  - `POST /reset`
-  - `POST /ingest`
-  - `GET /pipeline-runs/{run_date}`
-- parses incoming `xlsx/csv`
-- writes raw layer + `pipeline_runs` to Turso
 
 ### Turso/libSQL
 
@@ -63,8 +45,12 @@ Key schema file:
 Important current semantics:
 
 - raw payload remains DB-backed in `ingest_file_payloads`
-- `pipeline_runs` is the execution truth for `run_date`
-- `ingest_files.status` is intentionally simple again:
+- `pipeline_runs` is now a day-level summary, not the primary raw identity
+- `ingest_files.raw_file_key` is the stable file identity used by Apps Script ingest
+- `ingest_files.file_hash` is the content hash used for dedupe
+- `ingest_files.status` now supports the direct-write handoff state:
+  - `raw_only`
+- parsed/raw status set remains:
   - `ingested`
   - `skipped`
   - `error`
@@ -74,14 +60,14 @@ Important current semantics:
 Files:
 
 - [run_pipeline.py](/C:/visual%20projects/ym/scripts/run_pipeline.py)
-- [normalize_supabase.py](/C:/visual%20projects/ym/scripts/normalize_supabase.py)
+- [normalize_one_run.py](/C:/visual%20projects/ym/scripts/normalize_one_run.py)
 - [sync_goal_mapping_sheet.py](/C:/visual%20projects/ym/scripts/sync_goal_mapping_sheet.py)
 - [sync_export_rows_wide_sheet.py](/C:/visual%20projects/ym/scripts/sync_export_rows_wide_sheet.py)
 - [sync_pipeline_status_sheet.py](/C:/visual%20projects/ym/scripts/sync_pipeline_status_sheet.py)
 
 Role:
 
-- normalize dirty days from `pipeline_runs`
+- normalize dirty days selected from `pipeline_runs`
 - refresh operator/export layer
 - sync `отчеты`, `union`, `pipeline_status`
 
@@ -102,68 +88,32 @@ Recent cleanup also simplified ingest status semantics:
 - removed stale `uploaded / parsed / failed` file lifecycle statuses from the supported model
 - status endpoint now exposes only the day-level fields needed by the actual workflow
 - added a regression test for `skipped-only day -> raw_only`
+- added direct `Apps Script -> Turso` raw-write path with local Python parsing `raw_only` payloads later
 
 ## Current Operational Reality
 
-### Local ingest service
+### Primary path: direct Apps Script -> Turso
 
-The local ingest service can be started with:
+Apps Script now prefers:
 
-```powershell
-$env:INGEST_TOKEN='<ingest-token>'
-$env:TURSO_DATABASE_URL='libsql://<db-name>-<org>.turso.io'
-$env:TURSO_AUTH_TOKEN='<db-token>'
-uvicorn ingest_service.main:app --host 0.0.0.0 --port 8000
-```
+- `TURSO_DATABASE_URL`
+- `TURSO_AUTH_TOKEN`
 
-### Apps Script cannot reach localhost directly
+In that mode:
 
-This remains the hard boundary:
-
-- Google Apps Script cannot call `127.0.0.1`
-- if Apps Script must hit the local ingest service, you need a public bridge
-
-Current practical bridge:
-
-```powershell
-cloudflared tunnel --url http://127.0.0.1:8000 --no-autoupdate
-```
-
-That yields a temporary URL like:
-
-- `https://<random>.trycloudflare.com`
-
-Use that URL for:
-
-- `INGEST_BASE_URL`
-- `INGEST_STATUS_URL`
-
-This is an operational tunnel, not a supported hosted deployment target.
+- Apps Script scans the sync window and writes raw files/payloads straight into Turso
+- raw ingest is idempotent on stable file identity
+- default ingest no longer does destructive day reset
+- no local HTTP ingest is needed
+- no `cloudflared` tunnel is needed
+- local Python is run manually afterwards with `scripts/run_pipeline.py`
 
 ## Current Working Config Conventions
 
 ### Apps Script properties
 
-Used today:
-
-- `INGEST_BASE_URL`
-- `INGEST_TOKEN`
-- optional `INGEST_STATUS_URL`
-
-Legacy fallback still exists in code, but is no longer the preferred contour:
-
-- `SUPABASE_FUNCTION_URL`
-- `SUPABASE_INGEST_TOKEN`
-- `SUPABASE_REST_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-
-### Local ingest token
-
-The current local working token used in session was:
-
-- `local-ingest-token-ym`
-
-That is an operational local token, not a repo-level secret-management system.
+- `TURSO_DATABASE_URL`
+- `TURSO_AUTH_TOKEN`
 
 ## Turso Gotcha
 
@@ -180,9 +130,9 @@ That issue is runtime/ops, not repo architecture.
 
 ## Current Validation State
 
-Latest verified state after cleanup:
+Latest verified state after the direct-write cut:
 
-- Python tests: `91/91`
+- Python tests: `83/83`
 - JS tests: `39/39`
 - `node --check Code.js` passes
 
@@ -207,11 +157,11 @@ The next chat should **not** restart architecture churn.
 
 Reasonable next work:
 
-1. operate the current contour
-2. ingest real data through Apps Script
+1. configure Apps Script with `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`
+2. ingest real data through Apps Script directly into Turso
 3. run local Python post-processing
-4. validate `pipeline_runs`, `union`, and goal mappings
-5. only then optimize specific bottlenecks if they are real
+4. validate `raw_file_key/file_hash`, `pipeline_runs`, `union`, and goal mappings
+5. continue removing cloud `ingest_rows` from the main normalize path
 
 Unreasonable next work:
 
