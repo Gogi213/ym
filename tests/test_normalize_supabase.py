@@ -37,6 +37,24 @@ class NormalizeSupabaseTests(unittest.TestCase):
         self.assertEqual(canonical_field_for_header("Посетители, купившие товар"), ("goal", "посетители_купившие_товар"))
         self.assertEqual(canonical_field_for_header("Достижения избранных целей"), ("goal", "достижения_избранных_целей"))
 
+    def test_normalize_header_uses_cache_for_repeated_calls(self):
+        normalize_header.cache_clear()
+        self.assertEqual(normalize_header("UTM Source"), "utm_source")
+        before = normalize_header.cache_info()
+        self.assertEqual(normalize_header("UTM Source"), "utm_source")
+        after = normalize_header.cache_info()
+
+        self.assertGreater(after.hits, before.hits)
+
+    def test_canonical_field_for_header_uses_cache_for_repeated_calls(self):
+        canonical_field_for_header.cache_clear()
+        self.assertEqual(canonical_field_for_header("Визиты"), ("metric", "visits"))
+        before = canonical_field_for_header.cache_info()
+        self.assertEqual(canonical_field_for_header("Визиты"), ("metric", "visits"))
+        after = canonical_field_for_header.cache_info()
+
+        self.assertGreater(after.hits, before.hits)
+
     def test_parse_metric_value_handles_numbers_and_empty_values(self):
         self.assertEqual(parse_metric_value("1.0"), Decimal("1.0"))
         self.assertEqual(parse_metric_value("0"), Decimal("0"))

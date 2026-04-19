@@ -1,6 +1,7 @@
 import sqlite3
 import unittest
 from decimal import Decimal
+from unittest import mock
 
 from scripts.bootstrap_turso import load_bootstrap_sql
 
@@ -248,6 +249,44 @@ class NormalizeOperatorExportRuntimeTests(unittest.TestCase):
         self.assertEqual(row["users"], Decimal("23"))
         self.assertEqual(row["bounce_rate"], Decimal("10"))
         self.assertEqual(row["page_depth"], Decimal("80"))
+
+    def test_build_operator_export_rows_uses_precomputed_file_report_period(self):
+        from scripts.normalize.operator_export_runtime import build_operator_export_rows
+
+        files = [
+            {
+                "id": "file-a",
+                "run_date": "2026-04-17",
+                "message_date": "2026-04-17T10:00:00Z",
+                "primary_topic": "Topic A",
+                "matched_topic": "Topic A",
+                "topic_role": "primary",
+                "attachment_type": "csv",
+                "header_json": ["UTM Source", "Визиты"],
+                "file_report_period": ("2026-04-10", "2026-04-10"),
+            }
+        ]
+        rows_by_file_id = {
+            "file-a": [
+                {
+                    "row_index": 1,
+                    "row_json": {
+                        "UTM Source": "google",
+                        "Визиты": "10",
+                    },
+                }
+            ]
+        }
+
+        with mock.patch(
+            "scripts.normalize.operator_export_runtime.extract_report_period_from_payload",
+            side_effect=AssertionError("builder should use precomputed file_report_period"),
+        ):
+            rows, _stats = build_operator_export_rows(files, rows_by_file_id, {"file-a": {}}, {})
+
+        self.assertEqual(rows[0]["report_date"], "2026-04-10")
+        self.assertEqual(rows[0]["report_date_from"], "2026-04-10")
+        self.assertEqual(rows[0]["report_date_to"], "2026-04-10")
 
 
 if __name__ == "__main__":

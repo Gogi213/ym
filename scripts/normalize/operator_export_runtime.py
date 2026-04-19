@@ -64,6 +64,7 @@ def prepare_files_for_operator_export(
         file_base64 = str(payload.get("file_base64") or "")
 
         status = "error"
+        file_report_period = None
         header: list[str] = []
         row_dicts: list[dict[str, str]] = []
         error_text: str | None = None
@@ -71,6 +72,10 @@ def prepare_files_for_operator_export(
         try:
             if not file_base64:
                 raise ValueError(f"Missing payload for raw file {file_id}")
+            file_report_period = extract_report_period_from_payload(
+                attachment_type=str(file_row.get("attachment_type") or ""),
+                file_base64=file_base64,
+            )
             parsed = parse_attachment(str(file_row.get("attachment_type") or ""), base64.b64decode(file_base64))
             if parsed.table is None:
                 status = "skipped"
@@ -101,6 +106,7 @@ def prepare_files_for_operator_export(
 
         prepared_file_row = dict(file_row)
         prepared_file_row.update(metadata_update)
+        prepared_file_row["file_report_period"] = file_report_period if status == "ingested" else None
         if status == "ingested":
             prepared_files.append(prepared_file_row)
 
@@ -124,10 +130,12 @@ def _build_primary_and_secondary_entries(
         message_date = _message_date_to_text(file_row.get("message_date"))
         goal_slots = goal_slots_by_topic.get(primary_topic, {})
         payload_row = payloads_by_file_id.get(file_id, {})
-        file_report_period = extract_report_period_from_payload(
-            attachment_type=file_row.get("attachment_type") or "",
-            file_base64=payload_row.get("file_base64"),
-        )
+        file_report_period = file_row.get("file_report_period")
+        if file_report_period is None:
+            file_report_period = extract_report_period_from_payload(
+                attachment_type=file_row.get("attachment_type") or "",
+                file_base64=payload_row.get("file_base64"),
+            )
 
         for raw_row in rows_by_file_id.get(file_id, []):
             payload = build_fact_payload(

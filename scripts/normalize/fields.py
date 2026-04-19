@@ -4,6 +4,7 @@ import base64
 from datetime import datetime
 from decimal import Decimal
 from decimal import InvalidOperation
+from functools import lru_cache
 import hashlib
 import io
 import json
@@ -50,6 +51,7 @@ IGNORED_IDENTITY_HEADERS = {
 }
 
 
+@lru_cache(maxsize=None)
 def normalize_header(value: str) -> str:
     normalized = str(value or "").strip().lower().replace("ё", "е")
     normalized = re.sub(r"[^\w]+", "_", normalized, flags=re.UNICODE)
@@ -57,6 +59,7 @@ def normalize_header(value: str) -> str:
     return normalized.strip("_")
 
 
+@lru_cache(maxsize=None)
 def canonical_field_for_header(header: str) -> Optional[Tuple[str, str]]:
     normalized = normalize_header(header)
     if normalized in HEADER_ALIASES:
