@@ -67,6 +67,41 @@ def _build_payloads_by_file_id(run_files: Sequence[Dict[str, Any]]) -> Dict[str,
     return payloads_by_file_id
 
 
+def _purge_skipped_raw_files(conn, run_date: str) -> int:
+    skipped_ids = [
+        str(row[0])
+        for row in conn.execute(
+            """
+            select id
+            from ingest_files
+            where run_date = ?
+              and status = 'skipped'
+            order by id
+            """,
+            (run_date,),
+        ).fetchall()
+    ]
+    if not skipped_ids:
+        return 0
+
+    placeholders = ", ".join(["?"] * len(skipped_ids))
+    conn.execute(
+        f"""
+        delete from ingest_file_payloads
+        where file_id in ({placeholders})
+        """,
+        tuple(skipped_ids),
+    )
+    conn.execute(
+        f"""
+        delete from ingest_files
+        where id in ({placeholders})
+        """,
+        tuple(skipped_ids),
+    )
+    return len(skipped_ids)
+
+
 def _refresh_pipeline_run_after_prepare(conn, run_date: str, *, total_files: int, raw_rows: int, ingested_files: int) -> None:
     conn.execute(
         """
@@ -157,6 +192,7 @@ def normalize_run(
     skip_delete_existing: bool = False,
 ) -> Dict[str, int]:
     started_at = time.perf_counter()
+    purged_skipped_files = 0
 
     def phase(name: str, **payload: Any) -> None:
         emit_log(
@@ -187,6 +223,9 @@ def normalize_run(
             phase("normalize_update_ingest_file_metadata_started", files=len(metadata_updates))
             _update_ingest_file_metadata(conn, metadata_updates)
             phase("normalize_update_ingest_file_metadata_finished")
+            phase("normalize_purge_skipped_raw_started")
+            purged_skipped_files = _purge_skipped_raw_files(conn, run_date)
+            phase("normalize_purge_skipped_raw_finished", purged_files=purged_skipped_files)
             phase("normalize_refresh_pipeline_run_started")
             _refresh_pipeline_run_after_prepare(
                 conn,
@@ -262,6 +301,7 @@ def normalize_run(
         "fact_rows": int(operator_export_stats.get("current_rows") or 0),
         "operator_export_rows": len(operator_export_rows),
         "goal_slots": len(topic_goal_slot_records),
+        "purged_skipped_files": purged_skipped_files,
         **operator_export_stats,
     }
     phase("normalize_finished", **public_payload(result))

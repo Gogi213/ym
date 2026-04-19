@@ -28,6 +28,45 @@ def build_bootstrap_connection():
 
 
 class RunPipelineTests(unittest.TestCase):
+    def test_purge_skipped_raw_files_removes_unneeded_payloads(self):
+        from scripts.normalize.pipeline import _purge_skipped_raw_files
+
+        connection = build_bootstrap_connection()
+        connection.executescript(
+            """
+            insert into pipeline_runs (
+              run_date, raw_revision, normalize_status, raw_files, raw_rows,
+              normalized_files, normalized_rows, last_ingest_at, normalized_at,
+              last_error, updated_at
+            ) values (
+              '2026-04-14', 1, 'pending_normalize', 2, 0, 0, 0,
+              '2026-04-14T09:00:00Z', null, null, '2026-04-14T09:00:00Z'
+            );
+            insert into ingest_files (
+              id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject,
+              primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
+              status, header_json, row_count, error_text
+            ) values
+              ('file-keep', 'rk-file-keep', 'hash-file-keep', '2026-04-14', 'm1', 't1', '2026-04-14T10:00:00Z', 's1', 'Topic A', 'Topic A', 'primary', 'a.csv', 'csv', 'ingested', '[]', 1, null),
+              ('file-drop', 'rk-file-drop', 'hash-file-drop', '2026-04-14', 'm2', 't2', '2026-04-14T10:01:00Z', 's2', 'Topic A', 'Topic A', 'primary', 'b.csv', 'csv', 'skipped', '[]', 0, 'no table');
+            insert into ingest_file_payloads (file_id, content_type, file_size_bytes, file_base64) values
+              ('file-keep', 'text/csv', 3, 'YWJj'),
+              ('file-drop', 'text/csv', 3, 'ZGVm');
+            """
+        )
+
+        purged = _purge_skipped_raw_files(connection, "2026-04-14")
+
+        self.assertEqual(purged, 1)
+        remaining_files = connection.execute(
+            "select id, status from ingest_files order by id"
+        ).fetchall()
+        remaining_payloads = connection.execute(
+            "select file_id from ingest_file_payloads order by file_id"
+        ).fetchall()
+        self.assertEqual([tuple(row) for row in remaining_files], [("file-keep", "ingested")])
+        self.assertEqual([tuple(row) for row in remaining_payloads], [("file-keep",)])
+
     def test_update_ingest_file_metadata_updates_rows_in_one_statement(self):
         from scripts.normalize.pipeline import _update_ingest_file_metadata
 
@@ -225,6 +264,53 @@ class RunPipelineTests(unittest.TestCase):
         self.assertEqual(result["fact_rows"], 1)
         self.assertEqual(dict(file_row), {"status": "ingested", "row_count": 1})
         self.assertEqual(raw_rows, 0)
+
+    def test_normalize_run_purges_skipped_raw_files_after_prepare(self):
+        from scripts.normalize.pipeline import normalize_run
+
+        connection = build_bootstrap_connection()
+        connection.executescript(
+            """
+            insert into pipeline_runs (
+              run_date, raw_revision, normalize_status, raw_files, raw_rows,
+              normalized_files, normalized_rows, last_ingest_at, normalized_at,
+              last_error, updated_at
+            ) values (
+              '2026-04-14', 1, 'pending_normalize', 2, 0, 0, 0,
+              '2026-04-14T09:00:00Z', null, null, '2026-04-14T09:00:00Z'
+            );
+            insert into ingest_files (
+              id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject,
+              primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
+              status, header_json, row_count, error_text
+            ) values
+              ('file-1', 'rk-file-1', 'hash-file-1', '2026-04-14', 'm1', 't1', '2026-04-14T10:00:00Z',
+               'Отчет за 2026-04-14', 'Topic A', 'Topic A', 'primary',
+               'a.csv', 'csv', 'raw_only', '[]', 0, null),
+              ('file-2', 'rk-file-2', 'hash-file-2', '2026-04-14', 'm2', 't2', '2026-04-14T10:01:00Z',
+               'Пустой файл', 'Topic A', 'Topic A', 'primary',
+               'b.csv', 'csv', 'raw_only', '[]', 0, null);
+            insert into ingest_file_payloads (file_id, content_type, file_size_bytes, file_base64) values
+              ('file-1', 'text/csv', 53, 'VVRNIFNvdXJjZTtVVE0gQ2FtcGFpZ2470JLQuNC30LjRgtGLCmdvb2dsZTticmFuZDsxMAo='),
+              ('file-2', 'text/csv', 13, 'bm90X2FfdGFibGUK');
+            """
+        )
+        connection.commit()
+
+        with patch("scripts.normalize.pipeline.connect_db", return_value=connection):
+            result = normalize_run("2026-04-14", defer_finalize=True)
+
+        remaining_files = connection.execute(
+            "select id, status from ingest_files order by id"
+        ).fetchall()
+        remaining_payloads = connection.execute(
+            "select file_id from ingest_file_payloads order by file_id"
+        ).fetchall()
+
+        self.assertEqual(result["files"], 1)
+        self.assertEqual(result["fact_rows"], 1)
+        self.assertEqual([tuple(row) for row in remaining_files], [("file-1", "ingested")])
+        self.assertEqual([tuple(row) for row in remaining_payloads], [("file-1",)])
 
     @patch("scripts.run_pipeline.sync_status_only")
     @patch("scripts.run_pipeline.sync_operator_views")
