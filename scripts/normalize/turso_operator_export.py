@@ -25,6 +25,7 @@ INSERT_COLUMNS = (
     *GOAL_COLUMNS,
 )
 DEFAULT_EXPORT_INSERT_CHUNK_SIZE = 500
+MAX_MULTI_VALUES_PARAMS = 5000
 
 
 def _build_metric_pivot_sql() -> str:
@@ -45,6 +46,22 @@ def _build_metric_pivot_sql() -> str:
 
 def _build_insert_columns_sql() -> str:
     return ", ".join(INSERT_COLUMNS)
+
+
+def _multi_values_chunk_size(column_count: int, preferred_chunk_size: int) -> int:
+    if column_count <= 0:
+        raise ValueError("column_count must be positive")
+    return max(1, min(preferred_chunk_size, MAX_MULTI_VALUES_PARAMS // column_count))
+
+
+def _build_multi_values_insert_sql(row_count: int) -> str:
+    placeholders = "(" + ", ".join(["?"] * len(INSERT_COLUMNS)) + ")"
+    values_sql = ", ".join([placeholders] * row_count)
+    return f"""
+        insert into operator_export_rows (
+          {_build_insert_columns_sql()}
+        ) values {values_sql}
+        """
 
 
 def _build_select_goal_sums_sql() -> str:
@@ -153,17 +170,13 @@ def replace_operator_export_rows_for_run(
         return value
 
     payload_rows = [tuple(normalize_value(row.get(column)) for column in INSERT_COLUMNS) for row in rows]
+    chunk_size = _multi_values_chunk_size(len(INSERT_COLUMNS), chunk_size)
     chunk_count = ceil(len(payload_rows) / chunk_size)
     for chunk_index in range(chunk_count):
         chunk = payload_rows[chunk_index * chunk_size : (chunk_index + 1) * chunk_size]
-        placeholders = ", ".join(["?"] * len(INSERT_COLUMNS))
-        conn.executemany(
-            f"""
-            insert into operator_export_rows (
-              {_build_insert_columns_sql()}
-            ) values ({placeholders})
-            """,
-            chunk,
+        conn.execute(
+            _build_multi_values_insert_sql(len(chunk)),
+            tuple(value for row in chunk for value in row),
         )
         if progress is not None:
             processed = min((chunk_index + 1) * chunk_size, len(payload_rows))

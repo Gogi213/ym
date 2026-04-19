@@ -12,6 +12,7 @@ DEFAULT_DELETE_CHUNK_SIZE = 25
 DEFAULT_FACT_ROWS_CHUNK_SIZE = 500
 DEFAULT_FACT_DIMENSIONS_CHUNK_SIZE = 2000
 DEFAULT_FACT_METRICS_CHUNK_SIZE = 2000
+MAX_MULTI_VALUES_PARAMS = 5000
 
 
 def _iter_chunks(rows: Sequence[Any], chunk_size: int) -> Iterable[Sequence[Any]]:
@@ -28,7 +29,7 @@ def _emit_progress(
     total: int,
     chunk_index: int,
     chunk_count: int,
-) -> None:
+    ) -> None:
     if progress is None or total <= 0:
         return
     progress(
@@ -40,6 +41,19 @@ def _emit_progress(
             "percent": round((processed / total) * 100, 2),
         }
     )
+
+
+def _multi_values_chunk_size(column_count: int, preferred_chunk_size: int) -> int:
+    if column_count <= 0:
+        raise ValueError("column_count must be positive")
+    return max(1, min(preferred_chunk_size, MAX_MULTI_VALUES_PARAMS // column_count))
+
+
+def _build_multi_values_sql(*, table_name: str, columns: Sequence[str], row_count: int, suffix_sql: str = "") -> str:
+    placeholders = "(" + ", ".join(["?"] * len(columns)) + ")"
+    values_sql = ", ".join([placeholders] * row_count)
+    suffix = f" {suffix_sql.strip()}" if suffix_sql.strip() else ""
+    return f"insert into {table_name} ({', '.join(columns)}) values {values_sql}{suffix}"
 
 
 def delete_existing_rows_for_run(
@@ -148,33 +162,35 @@ def mark_pipeline_run_error(conn, run_date: str, error_message: str) -> None:
 def upsert_topic_goal_slots(conn, records: Sequence[Dict[str, Any]]) -> None:
     if not records:
         return
-
-    conn.executemany(
-        """
-        insert into topic_goal_slots (
-          topic,
-          goal_slot,
-          source_header,
-          goal_label,
-          first_seen_file_id
-        ) values (?, ?, ?, ?, ?)
-        on conflict (topic, goal_slot) do update
-        set
-          source_header = excluded.source_header,
-          goal_label = coalesce(topic_goal_slots.goal_label, excluded.goal_label),
-          updated_at = current_timestamp
-        """,
-        [
-            (
-                row["topic"],
-                row["goal_slot"],
-                row["source_header"],
-                row["goal_label"],
-                row["first_seen_file_id"],
-            )
-            for row in records
-        ],
-    )
+    payload_rows = [
+        (
+            row["topic"],
+            row["goal_slot"],
+            row["source_header"],
+            row["goal_label"],
+            row["first_seen_file_id"],
+        )
+        for row in records
+    ]
+    columns = ("topic", "goal_slot", "source_header", "goal_label", "first_seen_file_id")
+    chunk_size = _multi_values_chunk_size(len(columns), len(payload_rows))
+    suffix_sql = """
+    on conflict (topic, goal_slot) do update
+    set
+      source_header = excluded.source_header,
+      goal_label = coalesce(topic_goal_slots.goal_label, excluded.goal_label),
+      updated_at = current_timestamp
+    """
+    for chunk in _iter_chunks(payload_rows, chunk_size):
+        conn.execute(
+            _build_multi_values_sql(
+                table_name="topic_goal_slots",
+                columns=columns,
+                row_count=len(chunk),
+                suffix_sql=suffix_sql,
+            ),
+            tuple(value for row in chunk for value in row),
+        )
 
 
 def insert_fact_rows(

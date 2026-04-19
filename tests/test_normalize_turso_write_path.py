@@ -258,6 +258,78 @@ class NormalizeTursoWritePathTests(unittest.TestCase):
             ],
         )
 
+    def test_replace_operator_export_rows_for_run_uses_bulk_insert_statement(self):
+        from scripts.normalize.turso_operator_export import replace_operator_export_rows_for_run
+
+        class FakeCursor:
+            def fetchall(self):
+                return []
+
+        class FakeConnection:
+            def __init__(self):
+                self.execute_calls = []
+                self.executemany_calls = []
+
+            def execute(self, sql, params=()):
+                self.execute_calls.append((" ".join(str(sql).split()).lower(), tuple(params)))
+                return FakeCursor()
+
+            def executemany(self, sql, seq_of_params):
+                self.executemany_calls.append((sql, list(seq_of_params)))
+                return FakeCursor()
+
+        connection = FakeConnection()
+
+        replace_operator_export_rows_for_run(
+            connection,
+            "2026-04-17",
+            [
+                {
+                    "run_date": "2026-04-17",
+                    "topic": "Topic A",
+                    "report_date": "2026-04-17",
+                    "report_date_from": "2026-04-17",
+                    "report_date_to": "2026-04-17",
+                    "utm_source": "google",
+                    "utm_medium": "cpc",
+                    "utm_campaign": "brand",
+                    "utm_content": "aggregated",
+                    "utm_term": "aggregated",
+                    "visits": 30,
+                    "users": 23,
+                    "bounce_rate": 10,
+                    "page_depth": 80,
+                    "time_on_site_seconds": None,
+                    "robot_rate": None,
+                    **{f"goal_{index}": (5 if index == 1 else None) for index in range(1, 26)},
+                },
+                {
+                    "run_date": "2026-04-17",
+                    "topic": "Topic B",
+                    "report_date": "2026-04-17",
+                    "report_date_from": "2026-04-17",
+                    "report_date_to": "2026-04-17",
+                    "utm_source": "yandex",
+                    "utm_medium": "cpc",
+                    "utm_campaign": "perf",
+                    "utm_content": "aggregated",
+                    "utm_term": "aggregated",
+                    "visits": 11,
+                    "users": 9,
+                    "bounce_rate": None,
+                    "page_depth": None,
+                    "time_on_site_seconds": None,
+                    "robot_rate": None,
+                    **{f"goal_{index}": None for index in range(1, 26)},
+                },
+            ],
+        )
+
+        self.assertEqual(connection.executemany_calls, [])
+        insert_calls = [call for call in connection.execute_calls if call[0].startswith("insert into operator_export_rows")]
+        self.assertEqual(len(insert_calls), 1)
+
+
     def test_mark_pipeline_run_ready_and_error_update_status_fields(self):
         from scripts.normalize.turso_writes import mark_pipeline_run_error, mark_pipeline_run_ready
 
@@ -336,6 +408,52 @@ class NormalizeTursoWritePathTests(unittest.TestCase):
                 (2, "Goal B", "Goal B"),
             ],
         )
+
+    def test_upsert_topic_goal_slots_uses_bulk_insert_statement(self):
+        from scripts.normalize.turso_writes import upsert_topic_goal_slots
+
+        class FakeCursor:
+            def fetchall(self):
+                return []
+
+        class FakeConnection:
+            def __init__(self):
+                self.execute_calls = []
+                self.executemany_calls = []
+
+            def execute(self, sql, params=()):
+                self.execute_calls.append((" ".join(str(sql).split()).lower(), tuple(params)))
+                return FakeCursor()
+
+            def executemany(self, sql, seq_of_params):
+                self.executemany_calls.append((sql, list(seq_of_params)))
+                return FakeCursor()
+
+        connection = FakeConnection()
+
+        upsert_topic_goal_slots(
+            connection,
+            [
+                {
+                    "topic": "Topic A",
+                    "goal_slot": 1,
+                    "source_header": "Goal A",
+                    "goal_label": "Goal A",
+                    "first_seen_file_id": "file-a",
+                },
+                {
+                    "topic": "Topic A",
+                    "goal_slot": 2,
+                    "source_header": "Goal B",
+                    "goal_label": "Goal B",
+                    "first_seen_file_id": "file-a",
+                },
+            ],
+        )
+
+        self.assertEqual(connection.executemany_calls, [])
+        insert_calls = [call for call in connection.execute_calls if call[0].startswith("insert into topic_goal_slots")]
+        self.assertEqual(len(insert_calls), 1)
 
     def test_insert_fact_records_and_refresh_current_flags(self):
         from scripts.normalize.turso_operator_flags import refresh_current_flags_for_row_keys
