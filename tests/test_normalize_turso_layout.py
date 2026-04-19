@@ -108,7 +108,7 @@ class NormalizeTursoLayoutTests(unittest.TestCase):
 
     def test_prepare_files_for_operator_export_parses_raw_only_payloads(self):
         from scripts.normalize.operator_export_runtime import prepare_files_for_operator_export
-        from scripts.normalize.turso_reads import fetch_run_files, fetch_ingest_payloads
+        from scripts.normalize.turso_reads import fetch_run_files
 
         connection = build_bootstrap_connection()
         connection.executescript(
@@ -136,8 +136,9 @@ class NormalizeTursoLayoutTests(unittest.TestCase):
         connection.commit()
 
         files = fetch_run_files(connection, "2026-04-14")
-        payloads = fetch_ingest_payloads(connection, ["file-1"])
-        prepared_files, rows_by_file_id, metadata_updates, prepared = prepare_files_for_operator_export(files, payloads)
+        self.assertEqual(files[0]["content_type"], "text/csv")
+        self.assertTrue(files[0]["file_base64"])
+        prepared_files, rows_by_file_id, metadata_updates, prepared = prepare_files_for_operator_export(files, {files[0]["id"]: files[0]})
 
         self.assertEqual(prepared, {"prepared_files": 1, "ingested_files": 1, "skipped_files": 0, "error_files": 0, "raw_rows": 1})
         self.assertEqual(prepared_files[0]["status"], "ingested")
@@ -154,7 +155,7 @@ class NormalizeTursoLayoutTests(unittest.TestCase):
 
     def test_prepare_files_for_operator_export_parses_legacy_placeholder_ingested_file(self):
         from scripts.normalize.operator_export_runtime import prepare_files_for_operator_export
-        from scripts.normalize.turso_reads import fetch_run_files, fetch_ingest_payloads
+        from scripts.normalize.turso_reads import fetch_run_files
 
         connection = build_bootstrap_connection()
         connection.executescript(
@@ -182,8 +183,9 @@ class NormalizeTursoLayoutTests(unittest.TestCase):
         connection.commit()
 
         files = fetch_run_files(connection, "2026-04-15")
-        payloads = fetch_ingest_payloads(connection, ["file-legacy"])
-        prepared_files, rows_by_file_id, metadata_updates, prepared = prepare_files_for_operator_export(files, payloads)
+        self.assertEqual(files[0]["content_type"], "text/csv")
+        self.assertTrue(files[0]["file_base64"])
+        prepared_files, rows_by_file_id, metadata_updates, prepared = prepare_files_for_operator_export(files, {files[0]["id"]: files[0]})
 
         self.assertEqual(prepared, {"prepared_files": 1, "ingested_files": 1, "skipped_files": 0, "error_files": 0, "raw_rows": 1})
         self.assertEqual(prepared_files[0]["status"], "ingested")

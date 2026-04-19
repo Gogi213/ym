@@ -51,25 +51,28 @@ def fetch_run_files(conn, run_date: str) -> List[Dict[str, Any]]:
     cursor = conn.execute(
         """
         select
-          id,
-          run_date,
-          message_id,
-          thread_id,
-          message_date,
-          message_subject,
-          primary_topic,
-          matched_topic,
-          topic_role,
-          attachment_name,
-          attachment_type,
-          status,
-          header_json
-        from ingest_files
-        where run_date = ?
-          and exists (select 1 from ingest_file_payloads p where p.file_id = ingest_files.id)
-        order by coalesce(primary_topic, matched_topic),
-                 case when coalesce(topic_role, 'primary') = 'primary' then 0 else 1 end,
-                 message_date, created_at, id
+          f.id,
+          f.run_date,
+          f.message_id,
+          f.thread_id,
+          f.message_date,
+          f.message_subject,
+          f.primary_topic,
+          f.matched_topic,
+          f.topic_role,
+          f.attachment_name,
+          f.attachment_type,
+          f.status,
+          f.header_json,
+          p.content_type,
+          p.file_base64
+        from ingest_files f
+        join ingest_file_payloads p
+          on p.file_id = f.id
+        where f.run_date = ?
+        order by coalesce(f.primary_topic, f.matched_topic),
+                 case when coalesce(f.topic_role, 'primary') = 'primary' then 0 else 1 end,
+                 f.message_date, f.created_at, f.id
         """,
         (run_date,),
     )

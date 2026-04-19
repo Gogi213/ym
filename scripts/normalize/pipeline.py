@@ -8,7 +8,6 @@ from .common import emit_log, public_payload
 from .db import (
     connect_db,
     fetch_existing_goal_slots,
-    fetch_ingest_payloads,
     fetch_run_files,
     mark_pipeline_run_error,
     mark_pipeline_run_ready,
@@ -23,26 +22,49 @@ from .transform import collect_goal_slots
 def _update_ingest_file_metadata(conn, metadata_updates: Sequence[Dict[str, Any]]) -> None:
     if not metadata_updates:
         return
-    conn.executemany(
-        """
+    normalized_updates = [
+        (
+            str(update.get("file_id") or ""),
+            str(update.get("status") or ""),
+            json.dumps(update.get("header_json") or [], ensure_ascii=False),
+            int(update.get("row_count") or 0),
+            update.get("error_text"),
+        )
+        for update in metadata_updates
+        if str(update.get("file_id") or "").strip()
+    ]
+    if not normalized_updates:
+        return
+
+    placeholders = ", ".join(["(?, ?, ?, ?, ?)"] * len(normalized_updates))
+    conn.execute(
+        f"""
+        with updates(file_id, status, header_json, row_count, error_text) as (
+          values {placeholders}
+        )
         update ingest_files
-        set status = ?,
-            header_json = ?,
-            row_count = ?,
-            error_text = ?
-        where id = ?
+        set status = (select updates.status from updates where updates.file_id = ingest_files.id),
+            header_json = (select updates.header_json from updates where updates.file_id = ingest_files.id),
+            row_count = (select updates.row_count from updates where updates.file_id = ingest_files.id),
+            error_text = (select updates.error_text from updates where updates.file_id = ingest_files.id)
+        where id in (select file_id from updates)
         """,
-        [
-            (
-                str(update.get("status") or ""),
-                json.dumps(update.get("header_json") or [], ensure_ascii=False),
-                int(update.get("row_count") or 0),
-                update.get("error_text"),
-                str(update.get("file_id") or ""),
-            )
-            for update in metadata_updates
-        ],
+        tuple(value for update in normalized_updates for value in update),
     )
+
+
+def _build_payloads_by_file_id(run_files: Sequence[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    payloads_by_file_id: Dict[str, Dict[str, Any]] = {}
+    for file_row in run_files:
+        file_id = str(file_row.get("id") or "").strip()
+        if not file_id:
+            continue
+        payloads_by_file_id[file_id] = {
+            "file_id": file_id,
+            "content_type": file_row.get("content_type"),
+            "file_base64": file_row.get("file_base64"),
+        }
+    return payloads_by_file_id
 
 
 def _refresh_pipeline_run_after_prepare(conn, run_date: str, *, total_files: int, raw_rows: int, ingested_files: int) -> None:
@@ -153,11 +175,9 @@ def normalize_run(
             phase("normalize_fetch_run_files_started")
             run_files = fetch_run_files(conn, run_date)
             phase("normalize_fetch_run_files_finished", files=len(run_files))
-            file_ids = [str(file_row["id"]) for file_row in run_files]
-
-            phase("normalize_fetch_payloads_started", file_ids=len(file_ids))
-            payloads_by_file_id = fetch_ingest_payloads(conn, file_ids)
-            phase("normalize_fetch_payloads_finished", payloads=len(payloads_by_file_id))
+            phase("normalize_build_payload_index_started", files=len(run_files))
+            payloads_by_file_id = _build_payloads_by_file_id(run_files)
+            phase("normalize_build_payload_index_finished", payloads=len(payloads_by_file_id))
             phase("normalize_prepare_raw_files_started", files=len(run_files))
             files, rows_by_file_id, metadata_updates, prepared_stats = prepare_files_for_operator_export(
                 run_files,

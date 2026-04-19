@@ -28,6 +28,65 @@ def build_bootstrap_connection():
 
 
 class RunPipelineTests(unittest.TestCase):
+    def test_update_ingest_file_metadata_updates_rows_in_one_statement(self):
+        from scripts.normalize.pipeline import _update_ingest_file_metadata
+
+        connection = build_bootstrap_connection()
+        connection.executescript(
+            """
+            insert into ingest_files (
+              id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject,
+              primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
+              status, header_json, row_count, error_text
+            ) values
+              ('file-1', 'rk-file-1', 'hash-file-1', '2026-04-14', 'm1', 't1', '2026-04-14T10:00:00Z', 's1', 'Topic A', 'Topic A', 'primary', 'a.csv', 'csv', 'raw_only', '[]', 0, null),
+              ('file-2', 'rk-file-2', 'hash-file-2', '2026-04-14', 'm2', 't2', '2026-04-14T10:01:00Z', 's2', 'Topic B', 'Topic B', 'primary', 'b.csv', 'csv', 'raw_only', '[]', 0, null);
+            """
+        )
+
+        _update_ingest_file_metadata(
+            connection,
+            [
+                {
+                    "file_id": "file-1",
+                    "status": "ingested",
+                    "header_json": ["UTM Source", "Визиты"],
+                    "row_count": 10,
+                    "error_text": None,
+                },
+                {
+                    "file_id": "file-2",
+                    "status": "skipped",
+                    "header_json": [],
+                    "row_count": 0,
+                    "error_text": "no table",
+                },
+            ],
+        )
+
+        rows = connection.execute(
+            "select id, status, header_json, row_count, error_text from ingest_files order by id"
+        ).fetchall()
+        self.assertEqual(
+            [dict(row) for row in rows],
+            [
+                {
+                    "id": "file-1",
+                    "status": "ingested",
+                    "header_json": '["UTM Source", "Визиты"]',
+                    "row_count": 10,
+                    "error_text": None,
+                },
+                {
+                    "id": "file-2",
+                    "status": "skipped",
+                    "header_json": "[]",
+                    "row_count": 0,
+                    "error_text": "no table",
+                },
+            ],
+        )
+
     def test_acquire_pipeline_lock_creates_and_releases_lock_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             lock_path = Path(tmpdir) / "run_pipeline.lock"
