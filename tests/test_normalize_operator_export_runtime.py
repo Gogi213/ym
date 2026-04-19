@@ -46,6 +46,7 @@ class NormalizeOperatorExportRuntimeTests(unittest.TestCase):
         self.assertEqual(stats["raw_rows"], 1)
         self.assertEqual(len(prepared_files), 1)
         self.assertEqual(prepared_files[0]["status"], "ingested")
+        self.assertIsNone(prepared_files[0]["file_report_period"])
         self.assertEqual(prepared_files[0]["row_count"], 1)
         self.assertEqual(prepared_files[0]["header_json"], ["UTM Source", "UTM Campaign", "Визиты"])
         self.assertEqual(
@@ -75,6 +76,35 @@ class NormalizeOperatorExportRuntimeTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_prepare_files_for_operator_export_uses_parse_result_report_period(self):
+        from scripts.normalize.operator_export_runtime import prepare_files_for_operator_export
+
+        files = [
+            {
+                "id": "file-1",
+                "run_date": "2026-04-17",
+                "message_date": "2026-04-17T10:00:00Z",
+                "primary_topic": "Topic A",
+                "matched_topic": "Topic A",
+                "topic_role": "primary",
+                "attachment_type": "csv",
+                "header_json": [],
+                "status": "raw_only",
+            }
+        ]
+        payloads_by_file_id = {
+            "file-1": {
+                "file_base64": "0J7RgtGH0LXRgiDQt9CwINC/0LXRgNC40L7QtCDRgSAyMDI2LTA0LTEwINC/0L4gMjAyNi0wNC0xMApVVE0gU291cmNlO1VUTSBDYW1wYWlnbjtCaXR5Cmdvb2dsZTticmFuZDsxMAo="
+            }
+        }
+
+        prepared_files, _rows_by_file_id, _metadata_updates, _stats = prepare_files_for_operator_export(
+            files,
+            payloads_by_file_id,
+        )
+
+        self.assertEqual(prepared_files[0]["file_report_period"], ("2026-04-10", "2026-04-10"))
 
     def test_build_operator_export_rows_uses_latest_primary_and_merges_secondary_goals(self):
         from scripts.normalize.operator_export_runtime import build_operator_export_rows
@@ -278,11 +308,7 @@ class NormalizeOperatorExportRuntimeTests(unittest.TestCase):
             ]
         }
 
-        with mock.patch(
-            "scripts.normalize.operator_export_runtime.extract_report_period_from_payload",
-            side_effect=AssertionError("builder should use precomputed file_report_period"),
-        ):
-            rows, _stats = build_operator_export_rows(files, rows_by_file_id, {"file-a": {}}, {})
+        rows, _stats = build_operator_export_rows(files, rows_by_file_id, {"file-a": {}}, {})
 
         self.assertEqual(rows[0]["report_date"], "2026-04-10")
         self.assertEqual(rows[0]["report_date_from"], "2026-04-10")

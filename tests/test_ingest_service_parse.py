@@ -47,6 +47,20 @@ class RawParseTests(unittest.TestCase):
         self.assertEqual(parsed.table.header, ["UTM Source", "UTM Campaign", "Визиты"])
         self.assertEqual(parsed.table.rows, [["google", "brand", "10"], ["yandex", "perf", "20"]])
         self.assertEqual(parsed.debug.type, "csv")
+        self.assertIsNone(parsed.report_period)
+
+    def test_parse_attachment_extracts_csv_report_period_in_same_pass(self):
+        from scripts.normalize.raw_parse import parse_attachment
+
+        payload = (
+            "Отчет за период с 2026-04-10 по 2026-04-10\n"
+            "UTM Source;UTM Campaign;Визиты\n"
+            "google;brand;10\n"
+        ).encode("utf-8")
+
+        parsed = parse_attachment("csv", payload)
+
+        self.assertEqual(parsed.report_period, ("2026-04-10", "2026-04-10"))
 
     def test_parse_attachment_detects_xlsx_table_block(self):
         from scripts.normalize.raw_parse import parse_attachment
@@ -79,6 +93,33 @@ class RawParseTests(unittest.TestCase):
         self.assertEqual(parsed.table.header, ["UTM Source", "UTM Campaign", "Визиты"])
         self.assertEqual(parsed.table.rows, [["google", "brand", "7"]])
         self.assertEqual(parsed.debug.type, "xlsx")
+        self.assertIsNone(parsed.report_period)
+
+    def test_parse_attachment_extracts_xlsx_report_period_in_same_pass(self):
+        from scripts.normalize.raw_parse import parse_attachment
+
+        sheet_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheetData>
+            <row r="1">
+              <c r="A1" t="inlineStr"><is><t>Отчет за период с 10.04.2026 по 10.04.2026</t></is></c>
+            </row>
+            <row r="2">
+              <c r="A2" t="inlineStr"><is><t>UTM Source</t></is></c>
+              <c r="B2" t="inlineStr"><is><t>UTM Campaign</t></is></c>
+              <c r="C2" t="inlineStr"><is><t>Визиты</t></is></c>
+            </row>
+            <row r="3">
+              <c r="A3" t="inlineStr"><is><t>google</t></is></c>
+              <c r="B3" t="inlineStr"><is><t>brand</t></is></c>
+              <c r="C3"><v>7</v></c>
+            </row>
+          </sheetData>
+        </worksheet>"""
+
+        parsed = parse_attachment("xlsx", build_xlsx_bytes(sheet_xml))
+
+        self.assertEqual(parsed.report_period, ("2026-04-10", "2026-04-10"))
 
     def test_parse_attachment_returns_null_table_when_no_utm_header(self):
         from scripts.normalize.raw_parse import parse_attachment

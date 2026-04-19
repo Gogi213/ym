@@ -5,6 +5,7 @@ from scripts.normalize_one_run import (
     assign_goal_slots,
     build_affected_row_keys,
     build_fact_payload,
+    compile_row_field_plan,
     build_layout_signature,
     build_merge_key,
     build_normalized_payloads,
@@ -156,6 +157,48 @@ class NormalizeSupabaseTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["robot_rate"], Decimal("0.0"))
         self.assertEqual(payload["goals"], {"goal_1": Decimal("2.0"), "goal_2": Decimal("5.0")})
         self.assertTrue(payload["row_hash"])
+
+    def test_build_fact_payload_compiled_plan_matches_default_path(self):
+        row = {
+            "UTM Source": "solta",
+            "UTM Medium": "cpm",
+            "UTM Campaign": "organon_tw_solta_cpm_banner",
+            "UTM Content": "banner",
+            "UTM Term": "term-1",
+            "Дата визита": "2026-04-05",
+            "Визиты": "1.0",
+            "Посетители": "1.0",
+            "Отказы": "0.0",
+            "Глубина просмотра": "1.0",
+            "Время на сайте": "00:00:14",
+            "Роботность": "0.0",
+            "Достижения цели (tw 1. Клик Купить)": "2.0",
+            "Достижения цели (tw 7. Переход в аптеки - сумма)": "5.0",
+        }
+        goal_slots = {
+            "Достижения цели (tw 1. Клик Купить)": 1,
+            "Достижения цели (tw 7. Переход в аптеки - сумма)": 2,
+        }
+
+        baseline = build_fact_payload(
+            topic="TW // Назонекс Аллерджи // Solta",
+            file_id="file-1",
+            row_index=1,
+            row=row,
+            message_date="2026-04-06T07:14:35+00:00",
+            goal_slots=goal_slots,
+        )
+        compiled = build_fact_payload(
+            topic="TW // Назонекс Аллерджи // Solta",
+            file_id="file-1",
+            row_index=1,
+            row=row,
+            message_date="2026-04-06T07:14:35+00:00",
+            goal_slots=goal_slots,
+            compiled_field_plan=compile_row_field_plan(row.keys(), goal_slots),
+        )
+
+        self.assertEqual(compiled, baseline)
 
     def test_build_fact_payload_row_hash_changes_for_unmapped_text_dimension(self):
         left = build_fact_payload(

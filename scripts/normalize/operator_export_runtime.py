@@ -5,7 +5,7 @@ from collections import defaultdict
 from decimal import Decimal
 from typing import Any, Dict, List, Sequence, Tuple
 
-from .fields import BASE_METRIC_KEYS, build_fact_payload, extract_report_period_from_payload
+from .fields import BASE_METRIC_KEYS, build_fact_payload, compile_row_field_plan
 from .raw_parse import parse_attachment
 from .transform import merge_secondary_payloads_into_primary
 
@@ -72,11 +72,8 @@ def prepare_files_for_operator_export(
         try:
             if not file_base64:
                 raise ValueError(f"Missing payload for raw file {file_id}")
-            file_report_period = extract_report_period_from_payload(
-                attachment_type=str(file_row.get("attachment_type") or ""),
-                file_base64=file_base64,
-            )
             parsed = parse_attachment(str(file_row.get("attachment_type") or ""), base64.b64decode(file_base64))
+            file_report_period = parsed.report_period
             if parsed.table is None:
                 status = "skipped"
                 stats["skipped_files"] += 1
@@ -129,15 +126,15 @@ def _build_primary_and_secondary_entries(
         topic_role = str(file_row.get("topic_role") or "primary")
         message_date = _message_date_to_text(file_row.get("message_date"))
         goal_slots = goal_slots_by_topic.get(primary_topic, {})
-        payload_row = payloads_by_file_id.get(file_id, {})
         file_report_period = file_row.get("file_report_period")
-        if file_report_period is None:
-            file_report_period = extract_report_period_from_payload(
-                attachment_type=file_row.get("attachment_type") or "",
-                file_base64=payload_row.get("file_base64"),
-            )
+        compiled_field_plans_by_shape: Dict[Tuple[str, ...], Any] = {}
 
         for raw_row in rows_by_file_id.get(file_id, []):
+            row_keys = tuple(str(key or "") for key in raw_row["row_json"].keys())
+            compiled_field_plan = compiled_field_plans_by_shape.get(row_keys)
+            if compiled_field_plan is None:
+                compiled_field_plan = compile_row_field_plan(row_keys, goal_slots)
+                compiled_field_plans_by_shape[row_keys] = compiled_field_plan
             payload = build_fact_payload(
                 topic=primary_topic,
                 file_id=file_id,
@@ -146,6 +143,7 @@ def _build_primary_and_secondary_entries(
                 message_date=message_date,
                 goal_slots=goal_slots,
                 file_report_period=file_report_period,
+                compiled_field_plan=compiled_field_plan,
             )
             if not payload["dimensions"] and not payload["metrics"] and not payload["goals"]:
                 continue

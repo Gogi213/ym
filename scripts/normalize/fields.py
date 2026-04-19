@@ -50,6 +50,8 @@ IGNORED_IDENTITY_HEADERS = {
     "посетители_добавившие_товар_в_корзину",
 }
 
+CompiledFieldPlan = List[Tuple[str, Optional[str], Optional[str], Optional[object]]]
+
 
 @lru_cache(maxsize=None)
 def normalize_header(value: str) -> str:
@@ -239,6 +241,30 @@ def build_layout_signature(headers: Iterable[str]) -> str:
     return "|".join(normalize_header(header) for header in headers if str(header or "").strip())
 
 
+def compile_row_field_plan(headers: Iterable[str], goal_slots: Dict[str, int]) -> CompiledFieldPlan:
+    plan: CompiledFieldPlan = []
+    for header in headers:
+        header_text = str(header or "")
+        normalized = normalize_header(header_text)
+        identity_key: Optional[str] = None
+        if normalized and normalized not in IGNORED_IDENTITY_HEADERS and not any(
+            normalized.startswith(prefix) for prefix in IGNORED_IDENTITY_HEADER_PREFIXES
+        ):
+            field = canonical_field_for_header(header_text)
+            if field is None:
+                identity_key = normalized
+        field = canonical_field_for_header(header_text)
+        if field is None:
+            plan.append((header_text, identity_key, None, None))
+            continue
+        field_kind, canonical_key = field
+        if field_kind == "goal":
+            plan.append((header_text, identity_key, field_kind, goal_slots.get(header_text)))
+        else:
+            plan.append((header_text, identity_key, field_kind, canonical_key))
+    return plan
+
+
 def build_fact_payload(
     *,
     topic: str,
@@ -248,41 +274,45 @@ def build_fact_payload(
     message_date: str,
     goal_slots: Dict[str, int],
     file_report_period: Optional[Tuple[str, str]] = None,
+    compiled_field_plan: Optional[CompiledFieldPlan] = None,
 ) -> Dict[str, object]:
     dimensions: Dict[str, str] = {}
     metrics: Dict[str, Decimal] = {}
     goals: Dict[str, Decimal] = {}
     identity_dimensions: Dict[str, str] = {}
+    field_plan = compiled_field_plan or compile_row_field_plan(row.keys(), goal_slots)
 
-    for header, raw_value in row.items():
-        if header_affects_row_identity(header, str(raw_value or "")):
-            identity_dimensions[normalize_header(header)] = str(raw_value or "").strip()
+    for header, identity_key, field_kind, field_target in field_plan:
+        raw_value = str(row.get(header, "") or "")
+        stripped_value = raw_value.strip()
 
-        field = canonical_field_for_header(header)
-        if field is None:
+        if identity_key is not None and stripped_value:
+            if parse_duration_to_seconds(raw_value) is None and parse_metric_value(raw_value) is None:
+                if not re.match(r"^\d{4}-\d{2}-\d{2}$", stripped_value) and not re.match(r"^\d{2}\.\d{2}\.\d{4}$", stripped_value):
+                    identity_dimensions[identity_key] = stripped_value
+
+        if field_kind is None:
             continue
 
-        field_kind, canonical_key = field
         if field_kind == "dimension":
-            value = str(raw_value or "").strip()
-            if value:
-                dimensions[canonical_key] = value
+            if stripped_value:
+                dimensions[str(field_target)] = stripped_value
             continue
 
         if field_kind == "metric":
-            if canonical_key == "time_on_site_seconds":
-                parsed_duration = parse_duration_to_seconds(str(raw_value or ""))
+            if field_target == "time_on_site_seconds":
+                parsed_duration = parse_duration_to_seconds(raw_value)
                 if parsed_duration is not None:
-                    metrics[canonical_key] = Decimal(parsed_duration)
+                    metrics[str(field_target)] = Decimal(parsed_duration)
             else:
-                parsed_metric = parse_metric_value(str(raw_value or ""))
+                parsed_metric = parse_metric_value(raw_value)
                 if parsed_metric is not None:
-                    metrics[canonical_key] = parsed_metric
+                    metrics[str(field_target)] = parsed_metric
             continue
 
         if field_kind == "goal":
-            slot_number = goal_slots.get(header)
-            parsed_goal = parse_metric_value(str(raw_value or ""))
+            slot_number = field_target
+            parsed_goal = parse_metric_value(raw_value)
             if slot_number is not None and parsed_goal is not None:
                 goals[f"goal_{slot_number}"] = parsed_goal
 
