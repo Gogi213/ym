@@ -113,7 +113,25 @@ function buildTursoResetRequests_(runDate) {
   ];
 }
 
-function buildTursoAttachmentRequests_(attachment, metadata) {
+function buildTursoRunInitRequests_(runDate) {
+  return [
+    buildTursoExecuteRequest_(
+      "insert into pipeline_runs (run_date, raw_revision, normalize_status, raw_files, raw_rows, normalized_files, normalized_rows, last_ingest_at, normalized_at, last_error, created_at, updated_at) values (?, 1, 'raw_only', 0, 0, 0, 0, current_timestamp, null, null, current_timestamp, current_timestamp) on conflict(run_date) do update set raw_revision = case when pipeline_runs.normalize_status in ('ready', 'normalize_error') then pipeline_runs.raw_revision + 1 else pipeline_runs.raw_revision end, normalize_status = 'raw_only', raw_rows = 0, normalized_files = 0, normalized_rows = 0, last_ingest_at = current_timestamp, normalized_at = null, last_error = null, updated_at = current_timestamp",
+      [runDate]
+    )
+  ];
+}
+
+function buildTursoRunRefreshRequests_(runDate) {
+  return [
+    buildTursoExecuteRequest_(
+      'update pipeline_runs set raw_files = (select count(*) from ingest_files where run_date = ?), last_ingest_at = current_timestamp, updated_at = current_timestamp where run_date = ?',
+      [runDate, runDate]
+    )
+  ];
+}
+
+function buildTursoAttachmentStatements_(attachment, metadata) {
   const blob = attachment.copyBlob();
   const bytes = blob.getBytes();
   const contentType = attachment.getContentType ? attachment.getContentType() : '';
@@ -124,10 +142,6 @@ function buildTursoAttachmentRequests_(attachment, metadata) {
   const fileId = rawFileKey;
 
   return [
-    buildTursoExecuteRequest_(
-      "insert into pipeline_runs (run_date, raw_revision, normalize_status, raw_files, raw_rows, normalized_files, normalized_rows, last_ingest_at, normalized_at, last_error, created_at, updated_at) values (?, 1, 'raw_only', 0, 0, 0, 0, current_timestamp, null, null, current_timestamp, current_timestamp) on conflict(run_date) do update set raw_revision = case when pipeline_runs.normalize_status in ('ready', 'normalize_error') then pipeline_runs.raw_revision + 1 else pipeline_runs.raw_revision end, normalize_status = 'raw_only', raw_rows = 0, normalized_files = 0, normalized_rows = 0, last_ingest_at = current_timestamp, normalized_at = null, last_error = null, updated_at = current_timestamp",
-      [metadata.run_date]
-    ),
     buildTursoExecuteRequest_(
       "insert into ingest_files (id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject, primary_topic, matched_topic, topic_role, attachment_name, attachment_type, status, header_json, row_count, error_text) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'raw_only', '[]', 0, null) on conflict(raw_file_key) do update set run_date = excluded.run_date, message_id = excluded.message_id, thread_id = excluded.thread_id, message_date = excluded.message_date, message_subject = excluded.message_subject, primary_topic = excluded.primary_topic, matched_topic = excluded.matched_topic, topic_role = excluded.topic_role, attachment_name = excluded.attachment_name, attachment_type = excluded.attachment_type, status = 'raw_only', header_json = '[]', row_count = 0, error_text = null, updated_at = current_timestamp",
       [
@@ -150,12 +164,43 @@ function buildTursoAttachmentRequests_(attachment, metadata) {
       'insert into ingest_file_payloads (file_id, content_type, file_size_bytes, file_base64) values (?, ?, ?, ?) on conflict(file_id) do update set content_type = excluded.content_type, file_size_bytes = excluded.file_size_bytes, file_base64 = excluded.file_base64',
       [fileId, contentType, fileSizeBytes, fileBase64]
     ),
-    buildTursoExecuteRequest_(
-      'update pipeline_runs set raw_files = (select count(*) from ingest_files where run_date = ?), last_ingest_at = current_timestamp, updated_at = current_timestamp where run_date = ?',
-      [metadata.run_date, metadata.run_date]
-    ),
-    { type: 'close' }
   ];
+}
+
+function buildTursoAttachmentBatchRequest_(settings, batch, options) {
+  const batchOptions = options || {};
+  const requests = [];
+
+  if (batchOptions.includeRunInit && batch.length) {
+    requests.push.apply(requests, buildTursoRunInitRequests_(batch[0].metadata.run_date));
+  }
+
+  for (let index = 0; index < batch.length; index++) {
+    requests.push.apply(
+      requests,
+      buildTursoAttachmentStatements_(batch[index].attachment, batch[index].metadata)
+    );
+  }
+
+  if (batch.length) {
+    requests.push.apply(
+      requests,
+      buildTursoRunRefreshRequests_(batch[0].metadata.run_date)
+    );
+  }
+
+  requests.push({ type: 'close' });
+  return buildTursoPipelineRequest_(settings, requests);
+}
+
+function buildTursoAttachmentRequests_(attachment, metadata) {
+  return JSON.parse(
+    buildTursoAttachmentBatchRequest_(
+      { pipelineUrl: '__internal__', authToken: '__internal__' },
+      [{ attachment, metadata }],
+      { includeRunInit: true }
+    ).payload
+  ).requests;
 }
 
 function buildTursoStatusRequest_(settings, runDate) {

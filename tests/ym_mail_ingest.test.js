@@ -1164,7 +1164,27 @@ test('runForDate_ uploads attachments from all matching messages in the window, 
   assert.equal(result.matchedMessages, 2);
   assert.equal(result.attachmentsSeen, 2);
   assert.equal(result.attachmentsSent, 2);
-  assert.equal(fetchCalls.length, 2);
+  assert.equal(fetchCalls.length, 1);
+
+  const payload = JSON.parse(fetchCalls[0].params.payload);
+  const allSql = payload.requests.map((item) => item.stmt && item.stmt.sql).filter(Boolean).join('\n');
+  assert.equal(
+    payload.requests.filter((item) => item.stmt && /insert into ingest_files/i.test(item.stmt.sql)).length,
+    2
+  );
+  assert.equal(
+    payload.requests.filter((item) => item.stmt && /insert into ingest_file_payloads/i.test(item.stmt.sql)).length,
+    2
+  );
+  assert.equal(
+    payload.requests.filter((item) => item.stmt && /insert into pipeline_runs/i.test(item.stmt.sql)).length,
+    1
+  );
+  assert.equal(
+    payload.requests.filter((item) => item.stmt && /update pipeline_runs set raw_files/i.test(item.stmt.sql)).length,
+    1
+  );
+  assert.doesNotMatch(allSql, /delete from ingest_file_payloads|delete from ingest_rows|delete from ingest_files/i);
 });
 
 test('buildAttachmentRequest_ uses stable content-based identity and upsert semantics', () => {

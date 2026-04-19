@@ -63,7 +63,7 @@ function runForDate_(runtime, runDate, startedAtMs, runContext, options) {
   }
   logProgress_('candidates_selected', candidatesSelectedPayload);
 
-  const attachmentRequests = [];
+  const attachmentInputs = [];
   const unsupportedAttachments = [];
 
   for (let i = 0; i < candidates.length; i++) {
@@ -87,24 +87,21 @@ function runForDate_(runtime, runDate, startedAtMs, runContext, options) {
       }
 
       stats.attachmentsSeen++;
-      attachmentRequests.push(
-        buildAttachmentRequest_(
-          settings,
-          attachment,
-          buildAttachmentMetadata_({
-            runDate,
-            primaryTopic: candidate.primaryTopic,
-            matchedTopic: candidate.matchedTopic,
-            topicRole: candidate.topicRole,
-            subject: candidate.subject,
-            messageDate: candidate.messageDate,
-            messageId: candidate.messageId,
-            threadId: candidate.threadId,
-            attachmentName: attachment.getName(),
-            attachmentType
-          })
-        )
-      );
+      attachmentInputs.push({
+        attachment,
+        metadata: buildAttachmentMetadata_({
+          runDate,
+          primaryTopic: candidate.primaryTopic,
+          matchedTopic: candidate.matchedTopic,
+          topicRole: candidate.topicRole,
+          subject: candidate.subject,
+          messageDate: candidate.messageDate,
+          messageId: candidate.messageId,
+          threadId: candidate.threadId,
+          attachmentName: attachment.getName(),
+          attachmentType
+        })
+      });
     }
   }
 
@@ -118,19 +115,23 @@ function runForDate_(runtime, runDate, startedAtMs, runContext, options) {
   }
   logProgress_('attachments_collected', attachmentsCollectedPayload);
 
-  const requestBatches = chunkItems_(attachmentRequests, 10);
+  const requestBatches = chunkItems_(attachmentInputs, 10);
   for (let batchIndex = 0; batchIndex < requestBatches.length; batchIndex++) {
     const batch = requestBatches[batchIndex];
     stats.uploadBatches++;
 
-    for (let responseIndex = 0; responseIndex < batch.length; responseIndex++) {
-      const response = fetchRequestWithRetry_(runtime.UrlFetchApp, batch[responseIndex], {
+    const response = fetchRequestWithRetry_(
+      runtime.UrlFetchApp,
+      buildTursoAttachmentBatchRequest_(settings, batch, {
+        includeRunInit: batchIndex === 0
+      }),
+      {
         maxAttempts: 3,
         retryableStatuses: [502, 503, 504]
-      });
-      assertSuccessfulIngestResponse_(settings, response, 'Attachment ingest');
-      stats.attachmentsSent++;
-    }
+      }
+    );
+    assertSuccessfulIngestResponse_(settings, response, 'Attachment ingest');
+    stats.attachmentsSent += batch.length;
 
     logProgress_('upload_batch_complete', {
       runDate,
