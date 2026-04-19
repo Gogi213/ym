@@ -4,11 +4,16 @@ from pathlib import Path
 from unittest.mock import patch
 import os
 import sqlite3
+import tempfile
 
 from scripts.run_pipeline import (
+    PipelineLockError,
+    acquire_pipeline_lock,
     has_failed_runs,
     run_pipeline,
     select_pending_run_dates,
+    sync_operator_views,
+    sync_status_only,
     should_use_bootstrap_mode,
     should_sync_full_operator_views,
 )
@@ -23,7 +28,32 @@ def build_bootstrap_connection():
 
 
 class RunPipelineTests(unittest.TestCase):
-    def test_select_pending_run_dates_returns_only_pending_days(self):
+    def test_acquire_pipeline_lock_creates_and_releases_lock_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lock_path = Path(tmpdir) / "run_pipeline.lock"
+            with acquire_pipeline_lock(lock_path=lock_path):
+                self.assertTrue(lock_path.exists())
+            self.assertFalse(lock_path.exists())
+
+    def test_acquire_pipeline_lock_rejects_running_process(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lock_path = Path(tmpdir) / "run_pipeline.lock"
+            lock_path.write_text('{"pid": 12345}', encoding="utf-8")
+            with patch("scripts.run_pipeline._is_process_running", return_value=True):
+                with self.assertRaises(PipelineLockError):
+                    with acquire_pipeline_lock(lock_path=lock_path):
+                        self.fail("lock acquisition should not succeed when another run is active")
+
+    def test_acquire_pipeline_lock_reclaims_stale_lock_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lock_path = Path(tmpdir) / "run_pipeline.lock"
+            lock_path.write_text('{"pid": 12345}', encoding="utf-8")
+            with patch("scripts.run_pipeline._is_process_running", return_value=False):
+                with acquire_pipeline_lock(lock_path=lock_path):
+                    self.assertTrue(lock_path.exists())
+            self.assertFalse(lock_path.exists())
+
+    def test_select_pending_run_dates_returns_raw_and_pending_days(self):
         self.assertEqual(
             select_pending_run_dates(
                 [
@@ -33,7 +63,7 @@ class RunPipelineTests(unittest.TestCase):
                     {"run_date": date(2026, 4, 8), "normalize_status": "normalize_error"},
                 ]
             ),
-            ["2026-04-10", "2026-04-08"],
+            ["2026-04-10", "2026-04-09", "2026-04-08"],
         )
 
     def test_should_sync_full_operator_views_only_when_normalized_runs_exist(self):
@@ -72,7 +102,7 @@ class RunPipelineTests(unittest.TestCase):
         )
 
     def test_should_use_bootstrap_mode_when_normalized_layer_is_empty(self):
-        self.assertTrue(
+        self.assertFalse(
             should_use_bootstrap_mode(
                 [
                     {"run_date": date(2026, 4, 12), "normalized_rows": 0},
@@ -93,7 +123,7 @@ class RunPipelineTests(unittest.TestCase):
             )
         )
 
-    def test_normalize_run_prepares_raw_only_files_before_building_fact_rows(self):
+    def test_normalize_run_parses_raw_only_files_without_writing_ingest_rows(self):
         from scripts.normalize.pipeline import normalize_run
 
         connection = build_bootstrap_connection()
@@ -135,7 +165,7 @@ class RunPipelineTests(unittest.TestCase):
         self.assertEqual(result["files"], 1)
         self.assertEqual(result["fact_rows"], 1)
         self.assertEqual(dict(file_row), {"status": "ingested", "row_count": 1})
-        self.assertEqual(raw_rows, 1)
+        self.assertEqual(raw_rows, 0)
 
     @patch("scripts.run_pipeline.sync_status_only")
     @patch("scripts.run_pipeline.sync_operator_views")
@@ -237,6 +267,75 @@ class RunPipelineTests(unittest.TestCase):
         )
         sync_operator_views_mock.assert_called_once()
         sync_status_only_mock.assert_not_called()
+
+    @patch("scripts.run_pipeline.sync_pipeline_status_sheet")
+    @patch("scripts.run_pipeline.sync_export_rows_wide_sheet")
+    @patch("scripts.run_pipeline.sync_goal_mapping_sheet")
+    def test_sync_operator_views_emits_per_sheet_progress(
+        self,
+        sync_goal_mapping_sheet_mock,
+        sync_export_rows_wide_sheet_mock,
+        sync_pipeline_status_sheet_mock,
+    ):
+        events = []
+        sync_goal_mapping_sheet_mock.return_value = {"rows_written": 10}
+        sync_export_rows_wide_sheet_mock.return_value = {"rows_written": 20}
+        sync_pipeline_status_sheet_mock.return_value = {"rows_written": 30}
+
+        result = sync_operator_views(
+            spreadsheet_id="sheet-id",
+            service_account_path=Path("key.json"),
+            logger=lambda phase, payload: events.append((phase, payload)),
+        )
+
+        self.assertEqual(
+            [phase for phase, _payload in events],
+            [
+                "sheet_sync_progress",
+                "sheet_sync_progress",
+                "sheet_sync_progress",
+                "sheet_sync_progress",
+                "sheet_sync_progress",
+                "sheet_sync_progress",
+            ],
+        )
+        self.assertEqual(
+            events,
+            [
+                ("sheet_sync_progress", {"sheet": "отчеты", "status": "started", "sheet_index": 1, "sheet_count": 3}),
+                ("sheet_sync_progress", {"sheet": "отчеты", "status": "finished", "sheet_index": 1, "sheet_count": 3, "rows_written": 10}),
+                ("sheet_sync_progress", {"sheet": "union", "status": "started", "sheet_index": 2, "sheet_count": 3}),
+                ("sheet_sync_progress", {"sheet": "union", "status": "finished", "sheet_index": 2, "sheet_count": 3, "rows_written": 20}),
+                ("sheet_sync_progress", {"sheet": "pipeline_status", "status": "started", "sheet_index": 3, "sheet_count": 3}),
+                ("sheet_sync_progress", {"sheet": "pipeline_status", "status": "finished", "sheet_index": 3, "sheet_count": 3, "rows_written": 30}),
+            ],
+        )
+        self.assertEqual(result["goal_mapping"], {"rows_written": 10})
+        self.assertEqual(result["union"], {"rows_written": 20})
+        self.assertEqual(result["pipeline_status"], {"rows_written": 30})
+
+    @patch("scripts.run_pipeline.sync_pipeline_status_sheet")
+    def test_sync_status_only_emits_sheet_progress(
+        self,
+        sync_pipeline_status_sheet_mock,
+    ):
+        events = []
+        sync_pipeline_status_sheet_mock.return_value = {"rows_written": 17}
+
+        result = sync_status_only(
+            spreadsheet_id="sheet-id",
+            service_account_path=Path("key.json"),
+            logger=lambda phase, payload: events.append((phase, payload)),
+        )
+
+        self.assertEqual(
+            events,
+            [
+                ("sheet_sync_progress", {"sheet": "pipeline_status", "status": "started", "sheet_index": 1, "sheet_count": 1}),
+                ("sheet_sync_progress", {"sheet": "pipeline_status", "status": "finished", "sheet_index": 1, "sheet_count": 1, "rows_written": 17}),
+            ],
+        )
+        self.assertEqual(result["pipeline_status"], {"rows_written": 17})
 
 
 if __name__ == "__main__":

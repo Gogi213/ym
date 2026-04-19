@@ -180,6 +180,43 @@ class TursoRuntimeTests(unittest.TestCase):
             ],
         )
 
+    def test_connect_turso_decodes_null_cells_without_value_field(self):
+        from scripts.turso_runtime import connect_turso, load_turso_config
+
+        def fake_urlopen(_request):
+            return self._FakeHttpResponse(
+                {
+                    "results": [
+                        {
+                            "type": "ok",
+                            "response": {
+                                "type": "execute",
+                                "result": {
+                                    "cols": ["goal_1"],
+                                    "rows": [[{"type": "null"}]],
+                                    "affected_row_count": 0,
+                                },
+                            },
+                        },
+                        {"type": "ok", "response": {"type": "close"}},
+                    ]
+                }
+            )
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "TURSO_DATABASE_URL": "libsql://example.turso.io",
+                "TURSO_AUTH_TOKEN": "secret-token",
+            },
+            clear=True,
+        ):
+            with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                conn = connect_turso(load_turso_config())
+                cursor = conn.execute("select null as goal_1")
+
+        self.assertEqual(cursor.fetchall(), [(None,)])
+
     def test_http_connection_reuses_baton_until_commit(self):
         from scripts.turso_runtime import connect_turso, load_turso_config
 

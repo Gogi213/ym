@@ -47,6 +47,39 @@ def _fetchall_with_columns(cursor):
     return rows, columns
 
 
+def fetch_run_files(conn, run_date: str) -> List[Dict[str, Any]]:
+    cursor = conn.execute(
+        """
+        select
+          id,
+          run_date,
+          message_id,
+          thread_id,
+          message_date,
+          message_subject,
+          primary_topic,
+          matched_topic,
+          topic_role,
+          attachment_name,
+          attachment_type,
+          status,
+          header_json
+        from ingest_files
+        where run_date = ?
+          and exists (select 1 from ingest_file_payloads p where p.file_id = ingest_files.id)
+        order by coalesce(primary_topic, matched_topic),
+                 case when coalesce(topic_role, 'primary') = 'primary' then 0 else 1 end,
+                 message_date, created_at, id
+        """,
+        (run_date,),
+    )
+    rows, columns = _fetchall_with_columns(cursor)
+    records = [_row_to_dict(row, columns) for row in rows]
+    for record in records:
+        record["header_json"] = _decode_json_column(record.get("header_json"), [])
+    return records
+
+
 def fetch_ingested_files(conn, run_date: str) -> List[Dict[str, Any]]:
     cursor = conn.execute(
         """
@@ -151,4 +184,5 @@ __all__ = [
     "fetch_ingest_payloads",
     "fetch_ingest_rows",
     "fetch_ingested_files",
+    "fetch_run_files",
 ]

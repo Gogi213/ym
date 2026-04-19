@@ -244,6 +244,8 @@ def _read_turso_cell_value(cell: Any) -> Any:
     if not isinstance(cell, dict):
         return cell
     cell_type = str(cell.get("type") or "").strip()
+    if cell_type == "null":
+        return None
     if "value" in cell:
         raw_value = cell.get("value")
         if cell_type == "integer":
@@ -256,8 +258,6 @@ def _read_turso_cell_value(cell: Any) -> Any:
                 return float(str(raw_value))
             except (TypeError, ValueError):
                 return raw_value
-        if cell_type == "null":
-            return None
         return raw_value
     if "base64" in cell:
         return cell.get("base64")

@@ -42,6 +42,222 @@ class NormalizeTursoWritePathTests(unittest.TestCase):
         remaining = connection.execute("select fact_row_id from fact_rows order by fact_row_id").fetchall()
         self.assertEqual([row[0] for row in remaining], ["fr-3"])
 
+    def test_delete_existing_rows_for_run_uses_explicit_file_ids_for_turso_safe_reruns(self):
+        from scripts.normalize.turso_writes import delete_existing_rows_for_run
+
+        class FakeCursor:
+            def __init__(self, rows):
+                self._rows = list(rows)
+
+            def fetchall(self):
+                return list(self._rows)
+
+        class FakeConnection:
+            def __init__(self):
+                self.file_ids = ["file-a", "file-b"]
+                self.row_keys = [("Topic A", "hash-1"), ("Topic A", "hash-2")]
+                self.fact_rows = [
+                    ("file-a", 1, "fr-1"),
+                    ("file-a", 2, "fr-2"),
+                    ("file-b", 1, "fr-3"),
+                ]
+
+            def execute(self, sql, params=()):
+                normalized_sql = " ".join(str(sql).split()).lower()
+                if normalized_sql.startswith("select id from ingest_files where run_date = ?"):
+                    return FakeCursor([(file_id,) for file_id in self.file_ids])
+                if "select distinct fr.topic, fr.row_hash" in normalized_sql:
+                    return FakeCursor(self.row_keys)
+                if normalized_sql.startswith("delete from fact_rows where source_file_id = ?"):
+                    target = tuple(params)[0]
+                    self.fact_rows = [row for row in self.fact_rows if row[0] != target]
+                    return FakeCursor([])
+                if normalized_sql.startswith("delete from fact_rows where source_file_id in ( select id from ingest_files"):
+                    raise AssertionError("delete_existing_rows_for_run should not rely on Turso-buggy subquery delete")
+                raise AssertionError(f"unexpected sql: {sql}")
+
+            def executemany(self, sql, seq_of_params):
+                for params in seq_of_params:
+                    self.execute(sql, params)
+                return FakeCursor([])
+
+        connection = FakeConnection()
+
+        deleted = delete_existing_rows_for_run(connection, "2026-04-14")
+
+        self.assertEqual(deleted, [("Topic A", "hash-1"), ("Topic A", "hash-2")])
+        self.assertEqual(connection.fact_rows, [])
+
+    def test_delete_existing_rows_for_run_emits_chunk_progress(self):
+        from scripts.normalize.turso_writes import delete_existing_rows_for_run
+
+        connection = build_bootstrap_connection()
+        connection.executescript(
+            """
+            insert into ingest_files (
+              id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject,
+              primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
+              status, header_json, row_count, error_text
+            ) values
+              ('file-a', 'rk-file-a', 'hash-file-a', '2026-04-14', 'm1', 't1', '2026-04-14T10:00:00Z', 's1', 'Topic A', 'Topic A', 'primary', 'a.csv', 'csv', 'ingested', '[]', 1, null),
+              ('file-b', 'rk-file-b', 'hash-file-b', '2026-04-14', 'm2', 't2', '2026-04-14T10:01:00Z', 's2', 'Topic A', 'Topic A', 'primary', 'b.csv', 'csv', 'ingested', '[]', 1, null),
+              ('file-c', 'rk-file-c', 'hash-file-c', '2026-04-14', 'm3', 't3', '2026-04-14T10:02:00Z', 's3', 'Topic A', 'Topic A', 'primary', 'c.csv', 'csv', 'ingested', '[]', 1, null);
+            insert into fact_rows (
+              fact_row_id, topic, source_file_id, source_row_index, report_date, report_date_from,
+              report_date_to, message_date, layout_signature, row_hash, is_current, source_row_json
+            ) values
+              ('fr-1', 'Topic A', 'file-a', 1, '2026-04-14', '2026-04-14', '2026-04-14', '2026-04-14T10:00:00Z', 'sig', 'hash-1', 1, '{}'),
+              ('fr-2', 'Topic A', 'file-b', 1, '2026-04-14', '2026-04-14', '2026-04-14', '2026-04-14T10:01:00Z', 'sig', 'hash-2', 1, '{}'),
+              ('fr-3', 'Topic A', 'file-c', 1, '2026-04-14', '2026-04-14', '2026-04-14', '2026-04-14T10:02:00Z', 'sig', 'hash-3', 1, '{}');
+            """
+        )
+        connection.commit()
+        progress_events = []
+
+        delete_existing_rows_for_run(
+            connection,
+            "2026-04-14",
+            progress=progress_events.append,
+            chunk_size=2,
+        )
+
+        self.assertEqual(
+            progress_events,
+            [
+                {"processed": 2, "total": 3, "chunk_index": 1, "chunk_count": 2, "percent": 66.67},
+                {"processed": 3, "total": 3, "chunk_index": 2, "chunk_count": 2, "percent": 100.0},
+            ],
+        )
+
+    def test_insert_fact_rows_emits_chunk_progress(self):
+        from scripts.normalize.turso_writes import insert_fact_rows
+
+        connection = build_bootstrap_connection()
+        connection.execute(
+            """
+            insert into ingest_files (
+              id, raw_file_key, file_hash, run_date, message_id, thread_id, message_date, message_subject,
+              primary_topic, matched_topic, topic_role, attachment_name, attachment_type,
+              status, header_json, row_count, error_text
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("file-a", "rk-file-a", "hash-file-a", "2026-04-14", "m1", "t1", "2026-04-14T10:00:00Z", "s1", "Topic A", "Topic A", "primary", "a.csv", "csv", "ingested", "[]", 3, None),
+        )
+        progress_events = []
+
+        insert_fact_rows(
+            connection,
+            [
+                {
+                    "fact_row_id": "fr-1",
+                    "topic": "Topic A",
+                    "source_file_id": "file-a",
+                    "source_row_index": 1,
+                    "report_date": "2026-04-14",
+                    "report_date_from": "2026-04-14",
+                    "report_date_to": "2026-04-14",
+                    "message_date": "2026-04-14T10:00:00Z",
+                    "layout_signature": "sig",
+                    "row_hash": "hash-1",
+                    "source_row_json": "{}",
+                },
+                {
+                    "fact_row_id": "fr-2",
+                    "topic": "Topic A",
+                    "source_file_id": "file-a",
+                    "source_row_index": 2,
+                    "report_date": "2026-04-14",
+                    "report_date_from": "2026-04-14",
+                    "report_date_to": "2026-04-14",
+                    "message_date": "2026-04-14T10:00:00Z",
+                    "layout_signature": "sig",
+                    "row_hash": "hash-2",
+                    "source_row_json": "{}",
+                },
+                {
+                    "fact_row_id": "fr-3",
+                    "topic": "Topic A",
+                    "source_file_id": "file-a",
+                    "source_row_index": 3,
+                    "report_date": "2026-04-14",
+                    "report_date_from": "2026-04-14",
+                    "report_date_to": "2026-04-14",
+                    "message_date": "2026-04-14T10:00:00Z",
+                    "layout_signature": "sig",
+                    "row_hash": "hash-3",
+                    "source_row_json": "{}",
+                },
+            ],
+            progress=progress_events.append,
+            chunk_size=2,
+        )
+
+        self.assertEqual(
+            progress_events,
+            [
+                {"processed": 2, "total": 3, "chunk_index": 1, "chunk_count": 2, "percent": 66.67},
+                {"processed": 3, "total": 3, "chunk_index": 2, "chunk_count": 2, "percent": 100.0},
+            ],
+        )
+
+    def test_replace_operator_export_rows_for_run_rebuilds_only_target_day(self):
+        from scripts.normalize.turso_operator_export import replace_operator_export_rows_for_run
+
+        connection = build_bootstrap_connection()
+        connection.executescript(
+            """
+            insert into operator_export_rows (
+              run_date, topic, report_date, report_date_from, report_date_to,
+              utm_source, utm_medium, utm_campaign, utm_content, utm_term,
+              visits, users, bounce_rate, page_depth, time_on_site_seconds, robot_rate,
+              goal_1
+            ) values
+              ('2026-04-16', 'Topic A', '2026-04-16', '2026-04-16', '2026-04-16', 'google', 'cpc', 'brand', 'aggregated', 'aggregated', 10, 8, 5, 20, null, null, 1),
+              ('2026-04-17', 'Topic B', '2026-04-17', '2026-04-17', '2026-04-17', 'yandex', 'cpc', 'campaign', 'aggregated', 'aggregated', 3, 2, null, null, null, null, null);
+            """
+        )
+
+        replace_operator_export_rows_for_run(
+            connection,
+            "2026-04-17",
+            [
+                {
+                    "run_date": "2026-04-17",
+                    "topic": "Topic A",
+                    "report_date": "2026-04-17",
+                    "report_date_from": "2026-04-17",
+                    "report_date_to": "2026-04-17",
+                    "utm_source": "google",
+                    "utm_medium": "cpc",
+                    "utm_campaign": "brand",
+                    "utm_content": "aggregated",
+                    "utm_term": "aggregated",
+                    "visits": 30,
+                    "users": 23,
+                    "bounce_rate": 10,
+                    "page_depth": 80,
+                    "time_on_site_seconds": None,
+                    "robot_rate": None,
+                    **{f"goal_{index}": (5 if index == 1 else None) for index in range(1, 26)},
+                }
+            ],
+        )
+
+        rows = connection.execute(
+            """
+            select run_date, topic, visits, users, goal_1
+            from operator_export_rows
+            order by run_date, topic
+            """
+        ).fetchall()
+        self.assertEqual(
+            [tuple(row) for row in rows],
+            [
+                ("2026-04-16", "Topic A", 10, 8, 1),
+                ("2026-04-17", "Topic A", 30, 23, 5),
+            ],
+        )
+
     def test_mark_pipeline_run_ready_and_error_update_status_fields(self):
         from scripts.normalize.turso_writes import mark_pipeline_run_error, mark_pipeline_run_ready
 

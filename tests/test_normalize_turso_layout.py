@@ -106,8 +106,9 @@ class NormalizeTursoLayoutTests(unittest.TestCase):
         self.assertEqual(mapping["Topic A"]["Goal A2"], 2)
         self.assertEqual(mapping["Topic B"]["Goal B1"], 1)
 
-    def test_prepare_raw_ingest_files_parses_raw_only_payloads(self):
-        from scripts.normalize.pipeline import prepare_raw_ingest_files
+    def test_prepare_files_for_operator_export_parses_raw_only_payloads(self):
+        from scripts.normalize.operator_export_runtime import prepare_files_for_operator_export
+        from scripts.normalize.turso_reads import fetch_run_files, fetch_ingest_payloads
 
         connection = build_bootstrap_connection()
         connection.executescript(
@@ -134,30 +135,26 @@ class NormalizeTursoLayoutTests(unittest.TestCase):
         )
         connection.commit()
 
-        prepared = prepare_raw_ingest_files(connection, "2026-04-14")
+        files = fetch_run_files(connection, "2026-04-14")
+        payloads = fetch_ingest_payloads(connection, ["file-1"])
+        prepared_files, rows_by_file_id, metadata_updates, prepared = prepare_files_for_operator_export(files, payloads)
 
-        row = connection.execute(
-            "select status, header_json, row_count, error_text from ingest_files where id = 'file-1'"
-        ).fetchone()
-        raw_rows = connection.execute(
-            "select row_index, row_json from ingest_rows where file_id = 'file-1' order by row_index"
-        ).fetchall()
-        pipeline = connection.execute(
-            "select raw_files, raw_rows, normalize_status from pipeline_runs where run_date = '2026-04-14'"
-        ).fetchone()
+        self.assertEqual(prepared, {"prepared_files": 1, "ingested_files": 1, "skipped_files": 0, "error_files": 0, "raw_rows": 1})
+        self.assertEqual(prepared_files[0]["status"], "ingested")
+        self.assertEqual(prepared_files[0]["header_json"], ["UTM Source", "UTM Campaign", "Визиты"])
+        self.assertEqual(prepared_files[0]["row_count"], 1)
+        self.assertEqual(
+            rows_by_file_id,
+            {"file-1": [{"row_index": 1, "row_json": {"UTM Source": "google", "UTM Campaign": "brand", "Визиты": "10"}}]},
+        )
+        self.assertEqual(
+            metadata_updates,
+            [{"file_id": "file-1", "status": "ingested", "header_json": ["UTM Source", "UTM Campaign", "Визиты"], "row_count": 1, "error_text": None}],
+        )
 
-        self.assertEqual(prepared, {"prepared_files": 1, "ingested_files": 1, "skipped_files": 0, "error_files": 0})
-        self.assertEqual(dict(row), {
-            "status": "ingested",
-            "header_json": '["UTM Source", "UTM Campaign", "Визиты"]',
-            "row_count": 1,
-            "error_text": None,
-        })
-        self.assertEqual([(item["row_index"], item["row_json"]) for item in raw_rows], [(1, '{"UTM Source": "google", "UTM Campaign": "brand", "Визиты": "10"}')])
-        self.assertEqual(dict(pipeline), {"raw_files": 1, "raw_rows": 1, "normalize_status": "pending_normalize"})
-
-    def test_prepare_raw_ingest_files_parses_legacy_placeholder_ingested_file(self):
-        from scripts.normalize.pipeline import prepare_raw_ingest_files
+    def test_prepare_files_for_operator_export_parses_legacy_placeholder_ingested_file(self):
+        from scripts.normalize.operator_export_runtime import prepare_files_for_operator_export
+        from scripts.normalize.turso_reads import fetch_run_files, fetch_ingest_payloads
 
         connection = build_bootstrap_connection()
         connection.executescript(
@@ -184,23 +181,22 @@ class NormalizeTursoLayoutTests(unittest.TestCase):
         )
         connection.commit()
 
-        prepared = prepare_raw_ingest_files(connection, "2026-04-15")
+        files = fetch_run_files(connection, "2026-04-15")
+        payloads = fetch_ingest_payloads(connection, ["file-legacy"])
+        prepared_files, rows_by_file_id, metadata_updates, prepared = prepare_files_for_operator_export(files, payloads)
 
-        row = connection.execute(
-            "select status, header_json, row_count, error_text from ingest_files where id = 'file-legacy'"
-        ).fetchone()
-        raw_rows = connection.execute(
-            "select row_index, row_json from ingest_rows where file_id = 'file-legacy' order by row_index"
-        ).fetchall()
-
-        self.assertEqual(prepared, {"prepared_files": 1, "ingested_files": 1, "skipped_files": 0, "error_files": 0})
-        self.assertEqual(dict(row), {
-            "status": "ingested",
-            "header_json": '["UTM Source", "UTM Campaign", "Визиты"]',
-            "row_count": 1,
-            "error_text": None,
-        })
-        self.assertEqual([(item["row_index"], item["row_json"]) for item in raw_rows], [(1, '{"UTM Source": "google", "UTM Campaign": "brand", "Визиты": "10"}')])
+        self.assertEqual(prepared, {"prepared_files": 1, "ingested_files": 1, "skipped_files": 0, "error_files": 0, "raw_rows": 1})
+        self.assertEqual(prepared_files[0]["status"], "ingested")
+        self.assertEqual(prepared_files[0]["header_json"], ["UTM Source", "UTM Campaign", "Визиты"])
+        self.assertEqual(prepared_files[0]["row_count"], 1)
+        self.assertEqual(
+            rows_by_file_id,
+            {"file-legacy": [{"row_index": 1, "row_json": {"UTM Source": "google", "UTM Campaign": "brand", "Визиты": "10"}}]},
+        )
+        self.assertEqual(
+            metadata_updates,
+            [{"file_id": "file-legacy", "status": "ingested", "header_json": ["UTM Source", "UTM Campaign", "Визиты"], "row_count": 1, "error_text": None}],
+        )
 
 
 if __name__ == "__main__":

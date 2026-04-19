@@ -1,35 +1,101 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence, Tuple
+from math import ceil
+from typing import Any, Callable, Dict, Iterable, List, Sequence, Tuple
 
 from .transform import build_pipeline_run_error_update, build_pipeline_run_ready_update
 
 
-def delete_existing_rows_for_run(conn, run_date: str) -> List[Tuple[str, str]]:
+ProgressCallback = Callable[[Dict[str, Any]], None]
+
+DEFAULT_DELETE_CHUNK_SIZE = 25
+DEFAULT_FACT_ROWS_CHUNK_SIZE = 500
+DEFAULT_FACT_DIMENSIONS_CHUNK_SIZE = 2000
+DEFAULT_FACT_METRICS_CHUNK_SIZE = 2000
+
+
+def _iter_chunks(rows: Sequence[Any], chunk_size: int) -> Iterable[Sequence[Any]]:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+    for start in range(0, len(rows), chunk_size):
+        yield rows[start : start + chunk_size]
+
+
+def _emit_progress(
+    progress: ProgressCallback | None,
+    *,
+    processed: int,
+    total: int,
+    chunk_index: int,
+    chunk_count: int,
+) -> None:
+    if progress is None or total <= 0:
+        return
+    progress(
+        {
+            "processed": processed,
+            "total": total,
+            "chunk_index": chunk_index,
+            "chunk_count": chunk_count,
+            "percent": round((processed / total) * 100, 2),
+        }
+    )
+
+
+def delete_existing_rows_for_run(
+    conn,
+    run_date: str,
+    *,
+    progress: ProgressCallback | None = None,
+    chunk_size: int = DEFAULT_DELETE_CHUNK_SIZE,
+) -> List[Tuple[str, str]]:
+    file_ids = [
+        str(row[0])
+        for row in conn.execute(
+            """
+            select id
+            from ingest_files
+            where run_date = ?
+            order by id
+            """,
+            (run_date,),
+        ).fetchall()
+    ]
+    if not file_ids:
+        return []
+
+    placeholders = ", ".join(["?"] * len(file_ids))
     rows = conn.execute(
-        """
+        f"""
         select distinct fr.topic, fr.row_hash
         from fact_rows fr
-        join ingest_files f
-          on f.id = fr.source_file_id
-        where f.run_date = ?
+        where fr.source_file_id in ({placeholders})
           and fr.topic is not null
           and fr.row_hash is not null
         order by fr.topic, fr.row_hash
         """,
-        (run_date,),
+        tuple(file_ids),
     ).fetchall()
-    conn.execute(
-        """
-        delete from fact_rows
-        where source_file_id in (
-          select id
-          from ingest_files
-          where run_date = ?
+    # Turso's HTTP pipeline path can leave rows behind when deleting through a run_date subquery.
+    # Delete by explicit file ids so reruns clean partial state deterministically.
+    chunk_count = ceil(len(file_ids) / chunk_size)
+    processed = 0
+    for chunk_index, chunk in enumerate(_iter_chunks(file_ids, chunk_size), start=1):
+        conn.executemany(
+            """
+            delete from fact_rows
+            where source_file_id = ?
+            """,
+            [(file_id,) for file_id in chunk],
         )
-        """,
-        (run_date,),
-    )
+        processed += len(chunk)
+        _emit_progress(
+            progress,
+            processed=processed,
+            total=len(file_ids),
+            chunk_index=chunk_index,
+            chunk_count=chunk_count,
+        )
     return [(str(row[0]), str(row[1])) for row in rows]
 
 
@@ -111,89 +177,143 @@ def upsert_topic_goal_slots(conn, records: Sequence[Dict[str, Any]]) -> None:
     )
 
 
-def insert_fact_rows(conn, rows: Sequence[Dict[str, Any]]) -> None:
+def insert_fact_rows(
+    conn,
+    rows: Sequence[Dict[str, Any]],
+    *,
+    progress: ProgressCallback | None = None,
+    chunk_size: int = DEFAULT_FACT_ROWS_CHUNK_SIZE,
+) -> None:
     if not rows:
         return
 
-    conn.executemany(
-        """
-        insert into fact_rows (
-          fact_row_id,
-          topic,
-          source_file_id,
-          source_row_index,
-          report_date,
-          report_date_from,
-          report_date_to,
-          message_date,
-          layout_signature,
-          row_hash,
-          source_row_json
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [
-            (
-                row["fact_row_id"],
-                row["topic"],
-                row["source_file_id"],
-                row["source_row_index"],
-                row.get("report_date"),
-                row.get("report_date_from"),
-                row.get("report_date_to"),
-                row.get("message_date"),
-                row["layout_signature"],
-                row["row_hash"],
-                row["source_row_json"],
-            )
-            for row in rows
-        ],
-    )
+    payload_rows = [
+        (
+            row["fact_row_id"],
+            row["topic"],
+            row["source_file_id"],
+            row["source_row_index"],
+            row.get("report_date"),
+            row.get("report_date_from"),
+            row.get("report_date_to"),
+            row.get("message_date"),
+            row["layout_signature"],
+            row["row_hash"],
+            row["source_row_json"],
+        )
+        for row in rows
+    ]
+    chunk_count = ceil(len(payload_rows) / chunk_size)
+    processed = 0
+    for chunk_index, chunk in enumerate(_iter_chunks(payload_rows, chunk_size), start=1):
+        conn.executemany(
+            """
+            insert into fact_rows (
+              fact_row_id,
+              topic,
+              source_file_id,
+              source_row_index,
+              report_date,
+              report_date_from,
+              report_date_to,
+              message_date,
+              layout_signature,
+              row_hash,
+              source_row_json
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            chunk,
+        )
+        processed += len(chunk)
+        _emit_progress(
+            progress,
+            processed=processed,
+            total=len(payload_rows),
+            chunk_index=chunk_index,
+            chunk_count=chunk_count,
+        )
 
 
-def insert_fact_dimensions(conn, rows: Sequence[Dict[str, Any]]) -> None:
+def insert_fact_dimensions(
+    conn,
+    rows: Sequence[Dict[str, Any]],
+    *,
+    progress: ProgressCallback | None = None,
+    chunk_size: int = DEFAULT_FACT_DIMENSIONS_CHUNK_SIZE,
+) -> None:
     if not rows:
         return
 
-    conn.executemany(
-        """
-        insert into fact_dimensions (
-          fact_row_id,
-          dimension_key,
-          dimension_value
-        ) values (?, ?, ?)
-        """,
-        [
-            (
-                row["fact_row_id"],
-                row["dimension_key"],
-                row.get("dimension_value"),
-            )
-            for row in rows
-        ],
-    )
+    payload_rows = [
+        (
+            row["fact_row_id"],
+            row["dimension_key"],
+            row.get("dimension_value"),
+        )
+        for row in rows
+    ]
+    chunk_count = ceil(len(payload_rows) / chunk_size)
+    processed = 0
+    for chunk_index, chunk in enumerate(_iter_chunks(payload_rows, chunk_size), start=1):
+        conn.executemany(
+            """
+            insert into fact_dimensions (
+              fact_row_id,
+              dimension_key,
+              dimension_value
+            ) values (?, ?, ?)
+            """,
+            chunk,
+        )
+        processed += len(chunk)
+        _emit_progress(
+            progress,
+            processed=processed,
+            total=len(payload_rows),
+            chunk_index=chunk_index,
+            chunk_count=chunk_count,
+        )
 
 
-def insert_fact_metrics(conn, rows: Sequence[Dict[str, Any]]) -> None:
+def insert_fact_metrics(
+    conn,
+    rows: Sequence[Dict[str, Any]],
+    *,
+    progress: ProgressCallback | None = None,
+    chunk_size: int = DEFAULT_FACT_METRICS_CHUNK_SIZE,
+) -> None:
     if not rows:
         return
 
-    conn.executemany(
-        """
-        insert into fact_metrics (
-          fact_row_id,
-          metric_key,
-          metric_value
-        ) values (?, ?, ?)
-        """,
-        [
-            (
-                row["fact_row_id"],
-                row["metric_key"],
-                row.get("metric_value"),
-            )
-            for row in rows
-        ],
-    )
+    payload_rows = [
+        (
+            row["fact_row_id"],
+            row["metric_key"],
+            row.get("metric_value"),
+        )
+        for row in rows
+    ]
+    chunk_count = ceil(len(payload_rows) / chunk_size)
+    processed = 0
+    for chunk_index, chunk in enumerate(_iter_chunks(payload_rows, chunk_size), start=1):
+        conn.executemany(
+            """
+            insert into fact_metrics (
+              fact_row_id,
+              metric_key,
+              metric_value
+            ) values (?, ?, ?)
+            """,
+            chunk,
+        )
+        processed += len(chunk)
+        _emit_progress(
+            progress,
+            processed=processed,
+            total=len(payload_rows),
+            chunk_index=chunk_index,
+            chunk_count=chunk_count,
+        )
 
 
 __all__ = [

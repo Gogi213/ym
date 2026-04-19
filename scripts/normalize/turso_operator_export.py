@@ -1,7 +1,30 @@
 from __future__ import annotations
 
+from decimal import Decimal
+from math import ceil
+from typing import Any, Callable, Dict, Sequence
 
 GOAL_COLUMNS = tuple(f"goal_{index}" for index in range(1, 26))
+INSERT_COLUMNS = (
+    "run_date",
+    "topic",
+    "report_date",
+    "report_date_from",
+    "report_date_to",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+    "visits",
+    "users",
+    "bounce_rate",
+    "page_depth",
+    "time_on_site_seconds",
+    "robot_rate",
+    *GOAL_COLUMNS,
+)
+DEFAULT_EXPORT_INSERT_CHUNK_SIZE = 500
 
 
 def _build_metric_pivot_sql() -> str:
@@ -21,27 +44,7 @@ def _build_metric_pivot_sql() -> str:
 
 
 def _build_insert_columns_sql() -> str:
-    return ", ".join(
-        [
-            "run_date",
-            "topic",
-            "report_date",
-            "report_date_from",
-            "report_date_to",
-            "utm_source",
-            "utm_medium",
-            "utm_campaign",
-            "utm_content",
-            "utm_term",
-            "visits",
-            "users",
-            "bounce_rate",
-            "page_depth",
-            "time_on_site_seconds",
-            "robot_rate",
-            *GOAL_COLUMNS,
-        ]
-    )
+    return ", ".join(INSERT_COLUMNS)
 
 
 def _build_select_goal_sums_sql() -> str:
@@ -126,4 +129,53 @@ def refresh_operator_export_rows_for_run(conn, run_date: str) -> None:
     conn.execute(OPERATOR_EXPORT_REFRESH_SQL, (run_date,))
 
 
-__all__ = ["GOAL_COLUMNS", "refresh_operator_export_rows_for_run"]
+def replace_operator_export_rows_for_run(
+    conn,
+    run_date: str,
+    rows: Sequence[Dict[str, Any]],
+    *,
+    progress: Callable[[Dict[str, Any]], None] | None = None,
+    chunk_size: int = DEFAULT_EXPORT_INSERT_CHUNK_SIZE,
+) -> None:
+    conn.execute(
+        """
+        delete from operator_export_rows
+        where run_date = ?
+        """,
+        (run_date,),
+    )
+    if not rows:
+        return
+
+    def normalize_value(value: Any) -> Any:
+        if isinstance(value, Decimal):
+            return str(value)
+        return value
+
+    payload_rows = [tuple(normalize_value(row.get(column)) for column in INSERT_COLUMNS) for row in rows]
+    chunk_count = ceil(len(payload_rows) / chunk_size)
+    for chunk_index in range(chunk_count):
+        chunk = payload_rows[chunk_index * chunk_size : (chunk_index + 1) * chunk_size]
+        placeholders = ", ".join(["?"] * len(INSERT_COLUMNS))
+        conn.executemany(
+            f"""
+            insert into operator_export_rows (
+              {_build_insert_columns_sql()}
+            ) values ({placeholders})
+            """,
+            chunk,
+        )
+        if progress is not None:
+            processed = min((chunk_index + 1) * chunk_size, len(payload_rows))
+            progress(
+                {
+                    "processed": processed,
+                    "total": len(payload_rows),
+                    "chunk_index": chunk_index + 1,
+                    "chunk_count": chunk_count,
+                    "percent": round((processed / len(payload_rows)) * 100, 2),
+                }
+            )
+
+
+__all__ = ["GOAL_COLUMNS", "refresh_operator_export_rows_for_run", "replace_operator_export_rows_for_run"]
