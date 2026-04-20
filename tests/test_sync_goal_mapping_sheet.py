@@ -94,6 +94,29 @@ class BuildGoalMappingGridTests(unittest.TestCase):
         self.assertEqual(updated[3][:3], ["_SenSoy_", "", ""])
         self.assertEqual(updated[3][3:], ["", "", ""])
 
+    def test_applies_goal_mapping_appends_missing_topics(self):
+        existing = [
+            ["Отчёт", "Комментарий", "goal_1", "goal_2"],
+            ["Topic A", "keep", "old-a1", ""],
+        ]
+        records = [
+            {
+                "topic": "Topic A",
+                "goal_1": "Goal A1",
+            },
+            {
+                "topic": "Topic B",
+                "goal_1": "Goal B1",
+                "goal_2": "Goal B2",
+            },
+        ]
+
+        updated = apply_goal_mapping_to_sheet_values(existing, records)
+
+        self.assertEqual(updated[0], existing[0])
+        self.assertEqual(updated[1], ["Topic A", "keep", "Goal A1", ""])
+        self.assertEqual(updated[2], ["Topic B", "", "Goal B1", "Goal B2"])
+
 
 if __name__ == "__main__":
     unittest.main()

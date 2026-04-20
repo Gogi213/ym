@@ -70,6 +70,25 @@ def apply_goal_mapping_to_sheet_values(
         for goal_name, column_index in goal_columns.items():
             row[column_index] = str(record.get(goal_name) or "")
 
+    existing_topics = {
+        str((row[0] if row else "")).strip()
+        for row in updated[1:]
+        if str((row[0] if row else "")).strip()
+    }
+    missing_topics = sorted(topic for topic in record_by_topic if topic not in existing_topics)
+    row_width = max((len(row) for row in updated), default=len(header))
+    row_width = max(row_width, len(header))
+
+    for topic in missing_topics:
+        record = record_by_topic[topic]
+        row = [""] * row_width
+        row[0] = topic
+        for goal_name, column_index in goal_columns.items():
+            if column_index >= len(row):
+                row.extend([""] * (column_index + 1 - len(row)))
+            row[column_index] = str(record.get(goal_name) or "")
+        updated.append(row)
+
     return updated
 
 
