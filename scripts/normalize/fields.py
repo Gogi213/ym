@@ -70,6 +70,8 @@ def canonical_field_for_header(header: str) -> Optional[Tuple[str, str]]:
         return None
     if "роботность" in normalized:
         return ("metric", "robot_rate")
+    if normalized.startswith("целевые_визиты_"):
+        return ("goal", normalized)
     if normalized in {
         "товаров_куплено",
         "посетители_купившие_товар",

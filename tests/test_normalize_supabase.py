@@ -32,6 +32,10 @@ class NormalizeSupabaseTests(unittest.TestCase):
         self.assertEqual(canonical_field_for_header("Визиты"), ("metric", "visits"))
         self.assertEqual(canonical_field_for_header("Роботность"), ("metric", "robot_rate"))
         self.assertEqual(canonical_field_for_header("Роботность PRO"), ("metric", "robot_rate"))
+        self.assertEqual(
+            canonical_field_for_header("Целевые визиты (OMD - T7 footer dealer form)"),
+            ("goal", "целевые_визиты_omd_t7_footer_dealer_form"),
+        )
         self.assertIsNone(canonical_field_for_header("Конверсия посетителей по избранным целям"))
         self.assertEqual(canonical_field_for_header("Доход по избранным целям"), ("goal", "доход_по_избранным_целям"))
         self.assertEqual(canonical_field_for_header("Товаров куплено"), ("goal", "товаров_куплено"))
@@ -157,6 +161,30 @@ class NormalizeSupabaseTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["robot_rate"], Decimal("0.0"))
         self.assertEqual(payload["goals"], {"goal_1": Decimal("2.0"), "goal_2": Decimal("5.0")})
         self.assertTrue(payload["row_hash"])
+
+    def test_build_fact_payload_maps_target_visits_columns_into_goal_slots(self):
+        payload = build_fact_payload(
+            topic="TENET цели апрель_1_SOLTA",
+            file_id="file-1",
+            row_index=1,
+            row={
+                "UTM Source": "solta",
+                "UTM Medium": "solta_prg_banner",
+                "UTM Campaign": "tenet_t7_apr_26",
+                "Дата визита": "2026-04-19",
+                "Посетители": "10",
+                "Целевые визиты (OMD - T7 footer dealer form)": "2",
+                "Целевые визиты (OMD - T4 Get an offer Form)": "5",
+            },
+            message_date="2026-04-20T01:44:04+00:00",
+            goal_slots={
+                "Целевые визиты (OMD - T7 footer dealer form)": 1,
+                "Целевые визиты (OMD - T4 Get an offer Form)": 2,
+            },
+        )
+
+        self.assertEqual(payload["metrics"]["users"], Decimal("10"))
+        self.assertEqual(payload["goals"], {"goal_1": Decimal("2"), "goal_2": Decimal("5")})
 
     def test_build_fact_payload_compiled_plan_matches_default_path(self):
         row = {
