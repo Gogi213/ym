@@ -18,14 +18,13 @@ class NormalizeModuleLayoutTests(unittest.TestCase):
         self.assertTrue(callable(pipeline.finalize_normalized_runs))
 
     def test_turso_submodules_expose_storage_boundaries(self):
-        from scripts.normalize import db, raw_parse, turso_operator_export, turso_operator_flags, turso_reads, turso_writes
+        from scripts.normalize import db, raw_parse, turso_operator_export, turso_reads, turso_writes
 
         self.assertEqual(db.backend_name(), "turso")
         self.assertTrue(callable(raw_parse.parse_attachment))
         self.assertTrue(callable(turso_reads.fetch_ingested_files))
-        self.assertTrue(callable(turso_writes.insert_fact_rows))
-        self.assertTrue(callable(turso_operator_flags.refresh_current_flags_for_row_keys))
-        self.assertTrue(callable(turso_operator_export.refresh_operator_export_rows_for_run))
+        self.assertTrue(callable(turso_writes.upsert_topic_goal_slots))
+        self.assertTrue(callable(turso_operator_export.replace_operator_export_rows_for_run))
         self.assertEqual(len(turso_operator_export.GOAL_COLUMNS), 25)
 
 

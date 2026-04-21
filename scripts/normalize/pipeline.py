@@ -189,7 +189,6 @@ def normalize_run(
     logger: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     *,
     defer_finalize: bool = False,
-    skip_delete_existing: bool = False,
 ) -> Dict[str, int]:
     started_at = time.perf_counter()
     purged_skipped_files = 0

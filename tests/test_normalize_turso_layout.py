@@ -49,43 +49,6 @@ class NormalizeTursoLayoutTests(unittest.TestCase):
         self.assertEqual([record["matched_topic"] for record in records], ["A Topic", "B Topic"])
         self.assertEqual(records[0]["header_json"], ["UTM Source", "Visits"])
 
-    def test_fetch_ingest_rows_groups_rows_by_file_id(self):
-        from scripts.normalize.turso_reads import fetch_ingest_rows
-
-        connection = build_bootstrap_connection()
-        connection.executescript(
-            """
-            insert into ingest_rows (file_id, run_date, row_index, row_json) values
-              ('f1', '2026-04-14', 1, '{"a":"1"}'),
-              ('f1', '2026-04-14', 2, '{"a":"2"}'),
-              ('f2', '2026-04-14', 1, '{"b":"3"}');
-            """
-        )
-        connection.commit()
-
-        grouped = fetch_ingest_rows(connection, ["f1", "f2"])
-
-        self.assertEqual([row["row_index"] for row in grouped["f1"]], [1, 2])
-        self.assertEqual(grouped["f2"][0]["row_json"], {"b": "3"})
-
-    def test_fetch_ingest_payloads_returns_map_by_file_id(self):
-        from scripts.normalize.turso_reads import fetch_ingest_payloads
-
-        connection = build_bootstrap_connection()
-        connection.executescript(
-            """
-            insert into ingest_file_payloads (file_id, content_type, file_size_bytes, file_base64) values
-              ('f1', 'text/csv', 3, 'YWJj'),
-              ('f2', 'application/vnd.ms-excel', 4, 'ZGVmZw==');
-            """
-        )
-        connection.commit()
-
-        payloads = fetch_ingest_payloads(connection, ["f1", "f2"])
-
-        self.assertEqual(payloads["f1"]["content_type"], "text/csv")
-        self.assertEqual(payloads["f2"]["file_base64"], "ZGVmZw==")
-
     def test_fetch_existing_goal_slots_returns_nested_mapping(self):
         from scripts.normalize.turso_reads import fetch_existing_goal_slots
 

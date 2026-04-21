@@ -1,28 +1,30 @@
 import unittest
 from decimal import Decimal
 
-from scripts.normalize_one_run import (
+from scripts.normalize.fields import (
     assign_goal_slots,
-    build_affected_row_keys,
     build_fact_payload,
-    compile_row_field_plan,
     build_layout_signature,
-    build_merge_key,
-    build_normalized_payloads,
-    build_pipeline_run_error_update,
-    build_pipeline_run_ready_update,
     build_topic_goal_slot_records,
     canonical_field_for_header,
-    extract_report_period_from_text,
+    compile_row_field_plan,
     extract_report_date,
-    merge_secondary_payloads_into_primary,
+    extract_report_period_from_text,
     normalize_header,
     parse_duration_to_seconds,
     parse_metric_value,
 )
+from scripts.normalize.transform import (
+    build_affected_row_keys,
+    build_merge_key,
+    build_normalized_payloads,
+    build_pipeline_run_error_update,
+    build_pipeline_run_ready_update,
+    merge_secondary_payloads_into_primary,
+)
 
 
-class NormalizeSupabaseTests(unittest.TestCase):
+class NormalizeTransformTests(unittest.TestCase):
     def test_normalize_header_normalizes_common_header_shapes(self):
         self.assertEqual(normalize_header("UTM Source"), "utm_source")
         self.assertEqual(normalize_header("Достижения цели (tw 1. Клик Купить)"), "достижения_цели_tw_1_клик_купить")

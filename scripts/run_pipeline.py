@@ -84,13 +84,6 @@ def has_failed_runs(results: List[Dict[str, Any]]) -> bool:
     return any(str(result.get("error") or "").strip() for result in results)
 
 
-def should_use_bootstrap_mode(records: List[Dict[str, Any]], selected_run_dates: List[str]) -> bool:
-    # The fast path is unsafe with the current Turso HTTP write path: a failed run can
-    # leave partially written fact rows even when pipeline status still reports zero
-    # normalized rows. Always rebuild explicitly until writes are fully transactional.
-    return False
-
-
 def should_sync_full_operator_views(
     failed_results: List[Dict[str, Any]],
     normalized_results: List[Dict[str, Any]],
@@ -195,14 +188,13 @@ def sync_status_only(*, spreadsheet_id: str, service_account_path: Path, logger=
     }
 
 
-def normalize_one_run_date(run_date: str, *, bootstrap_mode: bool = False) -> Dict[str, Any]:
+def normalize_one_run_date(run_date: str) -> Dict[str, Any]:
     return {
         "run_date": run_date,
         **normalize_run(
             run_date,
             logger=log_progress,
             defer_finalize=True,
-            skip_delete_existing=bootstrap_mode,
         ),
     }
 
@@ -218,21 +210,19 @@ def run_pipeline(
         selected_run_dates = run_dates[:] if run_dates else select_pending_run_dates(status_before)
         normalized_results: List[Dict[str, Any]] = []
         failed_results: List[Dict[str, Any]] = []
-        bootstrap_mode = should_use_bootstrap_mode(status_before, selected_run_dates)
 
         log_progress(
             "pipeline_started",
             {
                 "selected_run_dates": selected_run_dates,
                 "pending_count": len(selected_run_dates),
-                "bootstrap_mode": bootstrap_mode,
             },
         )
 
         for run_date in selected_run_dates:
             log_progress("normalize_started", {"run_date": run_date})
             try:
-                result = normalize_one_run_date(run_date, bootstrap_mode=bootstrap_mode)
+                result = normalize_one_run_date(run_date)
             except Exception as error:
                 failure = {"run_date": run_date, "error": str(error)}
                 failed_results.append(failure)

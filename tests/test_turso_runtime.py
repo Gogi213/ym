@@ -323,8 +323,8 @@ class TursoRuntimeTests(unittest.TestCase):
             with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
                 conn = connect_turso(load_turso_config())
                 conn.executemany(
-                    "insert into ingest_rows values (?, ?, ?, ?)",
-                    [("file-1", "2026-04-16", index, f"row-{index}") for index in range(120)],
+                    "insert into topic_goal_slots (topic, goal_slot, source_header, goal_label) values (?, ?, ?, ?)",
+                    [("Topic A", index, f"Goal {index}", f"Goal {index}") for index in range(120)],
                 )
 
         execute_counts = [

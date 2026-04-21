@@ -27,7 +27,7 @@ What this repo does **not** maintain anymore:
 
 - hosted HTTP ingest target
 - Docker/container deployment path
-- Supabase/HTTP fallback runtime
+- legacy fallback runtimes
 
 ## Repository Layout
 
@@ -50,7 +50,7 @@ What this repo does **not** maintain anymore:
 1. Apps Script reads topic bindings from spreadsheet `17izchH29LyxuTCNWJ0SThSXmuubMnNFCjtPJiWtcxFA`, sheet `отчеты`.
 2. Apps Script scans matching Gmail messages in the sync window and writes idempotent raw `xlsx/csv` attachments into Turso/libSQL.
 3. Raw layer is written into Turso/libSQL.
-4. Local Python normalizer builds canonical fact tables and operator cache.
+4. Local Python parses raw payloads locally, updates compact normalized state in Turso, and refreshes operator export rows.
 5. Local Python sync scripts write `отчеты`, `union`, and `pipeline_status` back to Google Sheets.
 
 ## Apps Script
@@ -125,10 +125,20 @@ python scripts\run_pipeline.py --service-account-json key\service-account.json
 
 This is now the primary local step after direct Apps Script -> Turso ingest.
 
+Current supported hot path:
+
+- `ingest_files`
+- `ingest_file_payloads`
+- `pipeline_runs`
+- `topic_goal_slots`
+- `operator_export_rows`
+
+Legacy compatibility tables like `ingest_rows` / `fact_*` may still exist in schema history, but they are not part of the supported operator flow anymore.
+
 ## Performance Notes
 
-- Full month rebuild is expensive by design: raw ingest can contain tens of thousands of rows and each dirty `run_date` is normalized separately.
-- Empty-state rebuilds use bootstrap fast path inside `run_pipeline.py`.
+- Full month rebuild is still batch work: raw ingest can contain hundreds of files and each dirty `run_date` is normalized separately.
+- The expensive part is now read/parse/build of compact export rows, not `fact_*` remote write amplification.
 - `run_pipeline.py` is the supported operator entrypoint for local Python execution.
 - If there are no pending `run_date`, it only syncs `pipeline_status`.
 
@@ -141,10 +151,14 @@ The repo already contains validation work proving:
 
 ## Docs
 
+Primary explaining doc:
+- [2026-04-22-system-overview.md](./docs/2026-04-22-system-overview.md)
+
 Main technical note:
 - [2026-04-07-ym-mail-ingest-technical.md](./docs/2026-04-07-ym-mail-ingest-technical.md)
 - [2026-04-17-local-python-runbook.md](./docs/2026-04-17-local-python-runbook.md)
 - [2026-04-17-chat-transition.md](./docs/2026-04-17-chat-transition.md)
+- [2026-04-22-system-audit.md](./docs/2026-04-22-system-audit.md)
 
 Business note:
 - [2026-04-07-ym-mail-ingest-business.md](./docs/2026-04-07-ym-mail-ingest-business.md)

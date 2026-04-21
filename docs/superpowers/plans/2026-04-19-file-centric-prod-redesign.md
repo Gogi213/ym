@@ -1,6 +1,6 @@
 # Plan: File-Centric Prod Redesign
 
-**Architecture:** Keep Turso as the backend, but restore the Supabase-era business model: idempotent file-centric raw registry, local-memory normalization, canonical sparse facts, and publish as a separate phase. Stop using destructive day reset as the default ingest path.
+**Architecture:** Keep Turso as the backend, but restore the intended file-centric business model: idempotent raw registry, local-memory normalization, canonical compact output, and publish as a separate phase. Stop using destructive day reset as the default ingest path.
 
 ## Phase 1: Freeze the New Contract
 

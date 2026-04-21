@@ -115,49 +115,6 @@ def fetch_ingested_files(conn, run_date: str) -> List[Dict[str, Any]]:
     return records
 
 
-def fetch_ingest_rows(conn, file_ids: Sequence[str]) -> Dict[str, List[Dict[str, Any]]]:
-    if not file_ids:
-        return {}
-
-    placeholders = ", ".join(["?"] * len(file_ids))
-    cursor = conn.execute(
-        f"""
-        select file_id, row_index, row_json
-        from ingest_rows
-        where file_id in ({placeholders})
-        order by file_id, row_index
-        """,
-        tuple(file_ids),
-    )
-    rows, columns = _fetchall_with_columns(cursor)
-    grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for row in rows:
-        row_dict = _row_to_dict(row, columns)
-        row_dict["row_json"] = _decode_json_column(row_dict.get("row_json"), {})
-        grouped[str(row_dict["file_id"])].append(row_dict)
-    return grouped
-
-
-def fetch_ingest_payloads(conn, file_ids: Sequence[str]) -> Dict[str, Dict[str, Any]]:
-    if not file_ids:
-        return {}
-
-    placeholders = ", ".join(["?"] * len(file_ids))
-    cursor = conn.execute(
-        f"""
-        select file_id, content_type, file_base64
-        from ingest_file_payloads
-        where file_id in ({placeholders})
-        """,
-        tuple(file_ids),
-    )
-    rows, columns = _fetchall_with_columns(cursor)
-    return {
-        str(_row_value(row, columns, "file_id")): _row_to_dict(row, columns)
-        for row in rows
-    }
-
-
 def fetch_existing_goal_slots(conn, topics: Sequence[str]) -> Dict[str, Dict[str, int]]:
     if not topics:
         return {}
@@ -184,8 +141,6 @@ def fetch_existing_goal_slots(conn, topics: Sequence[str]) -> Dict[str, Dict[str
 
 __all__ = [
     "fetch_existing_goal_slots",
-    "fetch_ingest_payloads",
-    "fetch_ingest_rows",
     "fetch_ingested_files",
     "fetch_run_files",
 ]

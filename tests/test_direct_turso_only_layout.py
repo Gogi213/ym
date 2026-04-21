@@ -10,7 +10,6 @@ class DirectTursoOnlyLayoutTests(unittest.TestCase):
     def test_legacy_runtime_paths_are_removed(self):
         self.assertFalse((APPS_SCRIPT_DIR / "21_transport_http_ingest.js").exists())
         self.assertFalse((ROOT / "scripts" / "run_local_stack.py").exists())
-        self.assertFalse((ROOT / "supabase" / "functions" / "mail-ingest").exists())
 
     def test_apps_script_is_direct_turso_only(self):
         config_source = (APPS_SCRIPT_DIR / "00_config_and_topics.js").read_text(encoding="utf-8")

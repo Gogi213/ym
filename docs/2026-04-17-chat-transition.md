@@ -12,7 +12,7 @@ What is intentionally **not** in scope anymore:
 
 - hosted runtime migration
 - Docker/container deployment
-- Cloudflare Worker / R2 / Render / Northflank branches
+- abandoned hosting branches
 
 The point of the cleanup was to stop carrying abandoned runtime experiments and return to one maintainable contour.
 
@@ -33,10 +33,6 @@ Role:
 - does **not** normalize, aggregate, or sync operator views
 
 ### Turso/libSQL
-
-Primary working database right now:
-
-- `ym-migration-20260414`
 
 Key schema file:
 
@@ -78,8 +74,7 @@ The repo was deliberately cleaned back down to the supported contour.
 Removed:
 
 - Docker / compose / deploy scaffolding
-- Cloudflare Worker branch
-- Render / Northflank / Cloudflare runtime docs
+- abandoned hosting/runtime docs
 - R2 branch
 - abandoned deployment tests
 
@@ -105,8 +100,8 @@ In that mode:
 - raw ingest is idempotent on stable file identity
 - default ingest no longer does destructive day reset
 - no local HTTP ingest is needed
-- no `cloudflared` tunnel is needed
 - local Python is run manually afterwards with `scripts/run_pipeline.py`
+- skipped raw files are purged after normalize, so the DB keeps only raw that was actually used
 
 ## Current Working Config Conventions
 
@@ -130,16 +125,13 @@ That issue is runtime/ops, not repo architecture.
 
 ## Current Validation State
 
-Latest verified state after the direct-write cut:
+Latest verified state after runtime v2 cleanup:
 
-- Python tests: `83/83`
-- JS tests: `39/39`
-- `node --check Code.js` passes
-
-Existing validation already established:
-
-- `visits` are consistent across `raw -> export_rows_wide -> union`
-- `goal_N` are consistent across `raw -> export_rows_wide -> union`
+- direct `Apps Script -> Turso -> Python -> Sheets` runs complete end-to-end;
+- `visits` are consistent across `raw -> operator_export_rows -> union`;
+- `goal_N` are consistent across `raw -> operator_export_rows -> union`;
+- skipped raw payloads are purged after normalize;
+- the primary operator runtime no longer depends on `ingest_rows`.
 
 ## Most Important Files For The Next Chat
 
@@ -148,8 +140,7 @@ If a new chat needs to continue productively, start from these:
 - [README.md](/C:/visual%20projects/ym/README.md)
 - [2026-04-17-local-python-runbook.md](/C:/visual%20projects/ym/docs/2026-04-17-local-python-runbook.md)
 - [2026-04-07-ym-mail-ingest-technical.md](/C:/visual%20projects/ym/docs/2026-04-07-ym-mail-ingest-technical.md)
-- [2026-04-17-local-python-cloud-db-pipeline-design.md](/C:/visual%20projects/ym/docs/superpowers/specs/2026-04-17-local-python-cloud-db-pipeline-design.md)
-- [2026-04-17-local-python-cloud-db-pipeline.md](/C:/visual%20projects/ym/docs/superpowers/plans/2026-04-17-local-python-cloud-db-pipeline.md)
+- [2026-04-22-system-audit.md](/C:/visual%20projects/ym/docs/2026-04-22-system-audit.md)
 
 ## What Should Happen Next
 
@@ -161,7 +152,7 @@ Reasonable next work:
 2. ingest real data through Apps Script directly into Turso
 3. run local Python post-processing
 4. validate `raw_file_key/file_hash`, `pipeline_runs`, `union`, and goal mappings
-5. continue removing cloud `ingest_rows` from the main normalize path
+5. keep docs and launcher aligned with the current operator flow
 
 Unreasonable next work:
 

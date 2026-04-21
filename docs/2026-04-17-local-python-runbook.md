@@ -33,7 +33,7 @@ python scripts\run_pipeline.py --service-account-json key\service-account.json
 ```
 
 Теперь это основной локальный шаг после Apps Script.
-`run_pipeline.py` сам дочитает `raw_only` payload из Turso, распарсит `csv/xlsx`, заполнит `ingest_rows`, затем прогонит normalize и sheet sync.
+`run_pipeline.py` сам дочитает `raw_only` payload из Turso, распарсит `csv/xlsx`, обновит file metadata, построит compact export rows и затем прогонит sheet sync.
 
 ## Step 2.5: Optional doctor / smoke check
 
@@ -64,3 +64,4 @@ python scripts\normalize_one_run.py --run-date YYYY-MM-DD
 - `run_pipeline.py` — supported local post-processing entrypoint.
 - `pipeline_runs` — operational truth for day status.
 - Apps Script больше не использует локальный HTTP contour.
+- `ingest_rows` не является частью поддерживаемого hot path.

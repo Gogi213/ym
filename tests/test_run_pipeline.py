@@ -14,7 +14,6 @@ from scripts.run_pipeline import (
     select_pending_run_dates,
     sync_operator_views,
     sync_status_only,
-    should_use_bootstrap_mode,
     should_sync_full_operator_views,
 )
 from scripts.bootstrap_turso import load_bootstrap_sql
@@ -199,28 +198,6 @@ class RunPipelineTests(unittest.TestCase):
             )
         )
 
-    def test_should_use_bootstrap_mode_when_normalized_layer_is_empty(self):
-        self.assertFalse(
-            should_use_bootstrap_mode(
-                [
-                    {"run_date": date(2026, 4, 12), "normalized_rows": 0},
-                    {"run_date": date(2026, 4, 11), "normalized_rows": 0},
-                ],
-                ["2026-04-12", "2026-04-11"],
-            )
-        )
-
-    def test_should_not_use_bootstrap_mode_when_any_normalized_rows_exist(self):
-        self.assertFalse(
-            should_use_bootstrap_mode(
-                [
-                    {"run_date": date(2026, 4, 12), "normalized_rows": 10},
-                    {"run_date": date(2026, 4, 11), "normalized_rows": 0},
-                ],
-                ["2026-04-12", "2026-04-11"],
-            )
-        )
-
     def test_normalize_run_parses_raw_only_files_without_writing_ingest_rows(self):
         from scripts.normalize.pipeline import normalize_run
 
@@ -336,7 +313,7 @@ class RunPipelineTests(unittest.TestCase):
             ],
         ]
 
-        def normalize_side_effect(run_date, bootstrap_mode=False):
+        def normalize_side_effect(run_date):
             if run_date == "2026-04-11":
                 raise RuntimeError("boom")
             return {"run_date": run_date, "fact_rows": 10}

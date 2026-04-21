@@ -6,7 +6,6 @@ from . import (
     raw_parse,
     turso_connection,
     turso_operator_export,
-    turso_operator_flags,
     turso_reads,
     turso_writes,
 )
@@ -19,7 +18,6 @@ __all__ = [
     "raw_parse",
     "turso_connection",
     "turso_operator_export",
-    "turso_operator_flags",
     "turso_reads",
     "turso_writes",
 ]

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Вернуть после Turso migration правильную бизнес-модель Supabase-era:
+Вернуть после миграционного дрейфа правильную file-centric бизнес-модель:
 
 - file-centric raw registry;
 - dedupe по содержимому файла;
@@ -224,4 +224,4 @@ Redesign считается успешным, когда:
 - raw ingest становится idempotent на уровне файла;
 - новые/повторные ingest не дублируют известный payload;
 - local Python может нормализовать без обязательного `ingest_rows` cloud scratch layer;
-- business semantics Supabase-era полностью сохраняются на Turso backend.
+- file-centric business semantics полностью сохраняются на Turso backend.

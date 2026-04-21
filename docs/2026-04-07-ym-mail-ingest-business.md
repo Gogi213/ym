@@ -1,5 +1,9 @@
 # YM Mail Ingest MVP
 
+> Historical note: this document describes the early intake-only MVP framing.
+> It is useful as origin context, but it is not the canonical description of the current end-to-end system.
+> For the current high-level explanation, see [2026-04-22-system-overview.md](/C:/visual%20projects/ym/docs/2026-04-22-system-overview.md).
+
 ## 1. Бизнес-задача
 
 В почтовый ящик `ya-stats@solta.io` регулярно приходят клиентские отчеты во вложениях. Сейчас эти файлы нужно вручную находить, открывать, понимать, какие из них относятся к нужным темам, и отдельно проверять, есть ли внутри рабочая таблица с UTM-структурой. Это медленно, нестабильно и плохо масштабируется.

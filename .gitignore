@@ -7,11 +7,9 @@ __pycache__/
 venv/
 .pytest_cache/
 .DS_Store
-supabase/.temp/
 .turso/
 .tmp.*
 
 export_rows_wide*.csv
 ingest-service.out.log
 ingest-service.err.log
-cloudflared*.log

@@ -52,13 +52,10 @@ Stores:
   - `ingest_files`
   - `ingest_file_payloads`
 - normalized:
-  - `fact_rows`
-  - `fact_dimensions`
-  - `fact_metrics`
   - `topic_goal_slots`
+  - `operator_export_rows`
 - state/cache:
   - `pipeline_runs`
-  - `operator_export_rows`
 - views:
   - `export_rows_wide`
   - `goal_mapping_wide`
@@ -72,17 +69,16 @@ Files:
 
 Responsibility:
 
-- normalize raw rows into canonical sparse facts;
-- preserve current-row identity and operator-facing metrics;
+- parse raw payloads locally and build compact operator-facing rows;
 - merge `secondary` topics into `primary_topic` only on exact grain match;
-- refresh `operator_export_rows` and downstream sheet-facing views.
+- refresh `operator_export_rows`, `topic_goal_slots`, and downstream sheet-facing views.
 
 Backend selection:
 
 - the runtime is Turso-only;
 - if `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are missing, the shared Turso runtime also tries the local Turso CLI cache at `%APPDATA%\\turso\\settings.json`;
-- when Apps Script writes direct raw payloads, local Python now preprocesses `ingest_files.status = 'raw_only'` into parsed `ingested/skipped/error` rows before normalization.
-- `ingest_rows` is still present as a compatibility layer for the current local parser path, but it is not part of the target prod ingest contract.
+- when Apps Script writes direct raw payloads, local Python preprocesses `ingest_files.status = 'raw_only'` into parsed `ingested/skipped/error` metadata before normalization;
+- `ingest_rows` is not part of the supported hot path.
 
 ## Local orchestration
 
@@ -136,6 +132,12 @@ The pipeline is considered correct only when sums remain consistent across:
 - Google Sheets `union`
 
 This has already been validated for both `visits` and `goal_N` metrics on the working contour.
+
+### Raw retention
+
+- all matched raw files land in `ingest_files`/`ingest_file_payloads` first;
+- after local normalize, `skipped` raw files and their payloads are purged automatically;
+- the database keeps only raw files that were actually used by normalization.
 
 ## Local Commands
 

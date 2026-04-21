@@ -1040,7 +1040,7 @@ test('runForDate_ writes raw attachments directly to Turso without default reset
   );
   assert.doesNotMatch(
     ingestPayload.requests.map((request) => request.stmt && request.stmt.sql).join('\n'),
-    /delete from ingest_file_payloads|delete from ingest_rows|delete from ingest_files/i
+    /delete from ingest_file_payloads|delete from ingest_files/i
   );
 });
 
@@ -1184,7 +1184,7 @@ test('runForDate_ uploads attachments from all matching messages in the window, 
     payload.requests.filter((item) => item.stmt && /update pipeline_runs set raw_files/i.test(item.stmt.sql)).length,
     1
   );
-  assert.doesNotMatch(allSql, /delete from ingest_file_payloads|delete from ingest_rows|delete from ingest_files/i);
+  assert.doesNotMatch(allSql, /delete from ingest_file_payloads|delete from ingest_files/i);
 });
 
 test('buildAttachmentRequest_ uses stable content-based identity and upsert semantics', () => {

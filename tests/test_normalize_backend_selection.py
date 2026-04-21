@@ -58,23 +58,5 @@ class NormalizeBackendSelectionTests(unittest.TestCase):
         self.assertEqual(resolved, fake_rows)
         fetch_mock.assert_called_once_with(fake_connection, "2026-04-14")
 
-    def test_refresh_operator_export_rows_for_run_dispatches_to_turso_backend(self):
-        from scripts.normalize import db
-
-        fake_connection = object()
-        with mock.patch.dict(
-            os.environ,
-            {
-                "TURSO_DATABASE_URL": "libsql://example.turso.io",
-                "TURSO_AUTH_TOKEN": "secret-token",
-            },
-            clear=True,
-        ):
-            with mock.patch("scripts.normalize.db.turso_operator_export.refresh_operator_export_rows_for_run") as refresh_mock:
-                db.refresh_operator_export_rows_for_run(fake_connection, "2026-04-14")
-
-        refresh_mock.assert_called_once_with(fake_connection, "2026-04-14")
-
-
 if __name__ == "__main__":
     unittest.main()

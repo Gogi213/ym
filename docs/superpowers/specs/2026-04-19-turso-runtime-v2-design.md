@@ -226,7 +226,7 @@ Single-run lock уже обязателен: повторные локальны
 
 Runtime V2:
 
-- сохраняет рабочую бизнес-модель Supabase-era;
+- сохраняет рабочую file-centric бизнес-модель;
 - убирает самый дорогой технический дефект миграции в Turso;
 - делает `operator_export_rows` основным durable normalized output;
 - перестает хранить expensive row explosion как обязательный execution path.

@@ -274,7 +274,7 @@ def sync_export_rows_wide_sheet(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Sync export_rows_wide from Supabase to Google Sheets.")
+    parser = argparse.ArgumentParser(description="Sync export_rows_wide from Turso to Google Sheets.")
     parser.add_argument("--spreadsheet-id", required=True)
     parser.add_argument("--sheet-name", default="union")
     parser.add_argument("--service-account-json", required=True)

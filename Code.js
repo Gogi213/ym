@@ -627,10 +627,6 @@ function buildTursoResetRequests_(runDate) {
       [runDate]
     ),
     buildTursoExecuteRequest_(
-      'delete from ingest_rows where file_id in (select id from ingest_files where run_date = ?)',
-      [runDate]
-    ),
-    buildTursoExecuteRequest_(
       'delete from ingest_files where run_date = ?',
       [runDate]
     ),

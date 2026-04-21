@@ -75,16 +75,6 @@ def fetch_pipeline_status_records() -> List[Dict[str, Any]]:
                 max(f.message_date) as last_message_at
               from ingest_files f
               group by f.run_date
-            ),
-            normalized_summary as (
-              select
-                f.run_date,
-                count(distinct fr.source_file_id) as normalized_files,
-                count(*) as normalized_rows,
-                max(fr.created_at) as normalized_at
-              from fact_rows fr
-              join ingest_files f on f.id = fr.source_file_id
-              group by f.run_date
             )
             select
               rs.run_date,
@@ -95,15 +85,14 @@ def fetch_pipeline_status_records() -> List[Dict[str, Any]]:
               coalesce(i.skipped_files, 0) as skipped_files,
               coalesce(i.error_files, 0) as error_files,
               coalesce(rs.raw_rows, i.raw_rows, 0) as raw_rows,
-              coalesce(rs.normalized_files, n.normalized_files, 0) as normalized_files,
-              coalesce(rs.normalized_rows, n.normalized_rows, 0) as normalized_rows,
+              coalesce(rs.normalized_files, 0) as normalized_files,
+              coalesce(rs.normalized_rows, 0) as normalized_rows,
               coalesce(i.first_message_at, rs.last_ingest_at) as first_message_at,
               coalesce(i.last_message_at, rs.last_ingest_at) as last_message_at,
-              coalesce(rs.normalized_at, n.normalized_at) as normalized_at,
+              rs.normalized_at as normalized_at,
               rs.last_error
             from run_state rs
             left join ingest_summary i on i.run_date = rs.run_date
-            left join normalized_summary n on n.run_date = rs.run_date
             order by rs.run_date desc
             """,
         )

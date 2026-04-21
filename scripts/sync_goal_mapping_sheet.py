@@ -137,7 +137,7 @@ def sync_goal_mapping_sheet(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Sync goal mapping view from Supabase to Google Sheets.")
+    parser = argparse.ArgumentParser(description="Sync goal mapping view from Turso to Google Sheets.")
     parser.add_argument("--spreadsheet-id", required=True)
     parser.add_argument("--sheet-name", default="отчеты")
     parser.add_argument("--service-account-json", required=True)

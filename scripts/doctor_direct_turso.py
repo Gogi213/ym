@@ -81,18 +81,7 @@ def inspect_run_date(conn, run_date: str) -> Dict[str, Any]:
         """
         select
           count(*) as files_total,
-          sum(
-            case
-              when status = 'raw_only' then 1
-              when status = 'ingested'
-                and coalesce(row_count, 0) = 0
-                and coalesce(header_json, '[]') = '[]'
-                and exists (select 1 from ingest_file_payloads p where p.file_id = ingest_files.id)
-                and not exists (select 1 from ingest_rows r where r.file_id = ingest_files.id)
-              then 1
-              else 0
-            end
-          ) as raw_only_files,
+          sum(case when status = 'raw_only' then 1 else 0 end) as raw_only_files,
           sum(case when status = 'ingested' then 1 else 0 end) as ingested_files,
           sum(case when status = 'skipped' then 1 else 0 end) as skipped_files,
           sum(case when status = 'error' then 1 else 0 end) as error_files
@@ -148,16 +137,7 @@ def validate_raw_payloads(conn, run_date: str) -> Dict[str, Any]:
         from ingest_files f
         left join ingest_file_payloads p on p.file_id = f.id
         where f.run_date = ?
-          and (
-            f.status = 'raw_only'
-            or (
-              f.status = 'ingested'
-              and coalesce(f.row_count, 0) = 0
-              and coalesce(f.header_json, '[]') = '[]'
-              and exists (select 1 from ingest_file_payloads p2 where p2.file_id = f.id)
-              and not exists (select 1 from ingest_rows r where r.file_id = f.id)
-            )
-          )
+          and f.status = 'raw_only'
         order by f.message_date, f.created_at, f.id
         """,
         (run_date,),
