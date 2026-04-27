@@ -155,7 +155,7 @@ function elapsedMs_(startedAtMs) {
 
 function getAppsScriptRuntime_() {
   if (
-    typeof GmailApp === 'undefined' ||
+    typeof Gmail === 'undefined' ||
     typeof PropertiesService === 'undefined' ||
     typeof SpreadsheetApp === 'undefined' ||
     typeof Session === 'undefined' ||
@@ -165,7 +165,7 @@ function getAppsScriptRuntime_() {
   }
 
   return {
-    GmailApp,
+    Gmail,
     PropertiesService,
     Session,
     SpreadsheetApp,

@@ -19,7 +19,7 @@ function getScriptSettings_(propertiesService) {
 }
 
 function getBackfillSettings_(propertiesService) {
-  return Object.assign({ skipExistingEnabled: false }, getScriptSettings_(propertiesService));
+  return Object.assign({ skipExistingEnabled: true }, getScriptSettings_(propertiesService));
 }
 
 function postReset_(urlFetchApp, settings, runDate) {
@@ -28,6 +28,10 @@ function postReset_(urlFetchApp, settings, runDate) {
 
 function fetchRunDateExists_(urlFetchApp, settings, runDate) {
   return fetchTursoRunDateExists_(urlFetchApp, settings, runDate);
+}
+
+function fetchExistingRunDates_(urlFetchApp, settings, startRunDate, endRunDate) {
+  return fetchExistingTursoRunDates_(urlFetchApp, settings, startRunDate, endRunDate);
 }
 
 function buildRunContext_(runtime) {

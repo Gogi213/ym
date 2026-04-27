@@ -87,6 +87,29 @@ function encodeBytesBase64_(bytes) {
   throw new Error('No base64 encoder available in this runtime');
 }
 
+function buildAttachmentBlobData_(attachment, metadata) {
+  const blob = attachment.copyBlob();
+  const bytes = blob.getBytes();
+  const contentType = attachment.getContentType ? attachment.getContentType() : '';
+  const fileHash = computeSha256HexFromBytes_(bytes);
+  const rawFileKey = buildRawFileKey_(metadata, fileHash);
+  return {
+    bytes,
+    contentType,
+    fileHash,
+    rawFileKey,
+    fileId: rawFileKey
+  };
+}
+
+function buildPreparedAttachmentInput_(attachment, metadata) {
+  return {
+    attachment,
+    metadata,
+    blobData: buildAttachmentBlobData_(attachment, metadata)
+  };
+}
+
 function buildTursoResetRequests_(runDate) {
   return [
     buildTursoExecuteRequest_(
@@ -127,15 +150,16 @@ function buildTursoRunRefreshRequests_(runDate) {
   ];
 }
 
-function buildTursoAttachmentStatements_(attachment, metadata) {
-  const blob = attachment.copyBlob();
-  const bytes = blob.getBytes();
-  const contentType = attachment.getContentType ? attachment.getContentType() : '';
+function buildTursoAttachmentStatements_(attachmentInput) {
+  const metadata = attachmentInput.metadata;
+  const blobData = attachmentInput.blobData || buildAttachmentBlobData_(attachmentInput.attachment, metadata);
+  const bytes = blobData.bytes;
+  const contentType = blobData.contentType;
   const fileBase64 = encodeBytesBase64_(bytes);
   const fileSizeBytes = Array.isArray(bytes) ? bytes.length : Number(bytes && bytes.length ? bytes.length : 0);
-  const fileHash = computeSha256HexFromBytes_(bytes);
-  const rawFileKey = buildRawFileKey_(metadata, fileHash);
-  const fileId = rawFileKey;
+  const fileHash = blobData.fileHash;
+  const rawFileKey = blobData.rawFileKey;
+  const fileId = blobData.fileId;
 
   return [
     buildTursoExecuteRequest_(
@@ -174,7 +198,7 @@ function buildTursoAttachmentBatchRequest_(settings, batch, options) {
   for (let index = 0; index < batch.length; index++) {
     requests.push.apply(
       requests,
-      buildTursoAttachmentStatements_(batch[index].attachment, batch[index].metadata)
+      buildTursoAttachmentStatements_(batch[index])
     );
   }
 
@@ -193,10 +217,24 @@ function buildTursoAttachmentRequests_(attachment, metadata) {
   return JSON.parse(
     buildTursoAttachmentBatchRequest_(
       { pipelineUrl: '__internal__', authToken: '__internal__' },
-      [{ attachment, metadata }],
+      [buildPreparedAttachmentInput_(attachment, metadata)],
       { includeRunInit: true }
     ).payload
   ).requests;
+}
+
+function buildTursoExistingRawFileKeysRequest_(settings, rawFileKeys) {
+  const placeholders = rawFileKeys.map(() => '?').join(', ');
+  return buildTursoPipelineRequest_(
+    settings,
+    [
+      buildTursoExecuteRequest_(
+        `select f.raw_file_key from ingest_files f join ingest_file_payloads p on p.file_id = f.id where f.raw_file_key in (${placeholders})`,
+        rawFileKeys
+      ),
+      { type: 'close' }
+    ]
+  );
 }
 
 function buildTursoStatusRequest_(settings, runDate) {
@@ -206,6 +244,19 @@ function buildTursoStatusRequest_(settings, runDate) {
       buildTursoExecuteRequest_(
         'select normalize_status from pipeline_runs where run_date = ? limit 1',
         [runDate]
+      ),
+      { type: 'close' }
+    ]
+  );
+}
+
+function buildTursoExistingRunDatesRequest_(settings, startRunDate, endRunDate) {
+  return buildTursoPipelineRequest_(
+    settings,
+    [
+      buildTursoExecuteRequest_(
+        'select run_date from pipeline_runs where run_date >= ? and run_date <= ? order by run_date asc',
+        [startRunDate, endRunDate]
       ),
       { type: 'close' }
     ]
@@ -304,6 +355,60 @@ function fetchTursoRunDateExists_(urlFetchApp, settings, runDate) {
   if (!rows.length) {
     return false;
   }
-  const normalizeStatus = String(rows[0].normalize_status || '').trim();
-  return normalizeStatus ? normalizeStatus === 'ready' : true;
+  return true;
+}
+
+function fetchExistingTursoRunDates_(urlFetchApp, settings, startRunDate, endRunDate) {
+  const found = {};
+  const response = assertSuccessfulTursoResponse_(
+    fetchRequestWithRetry_(
+      urlFetchApp,
+      buildTursoExistingRunDatesRequest_(settings, startRunDate, endRunDate),
+      {
+        maxAttempts: 3,
+        retryableStatuses: [502, 503, 504]
+      }
+    ),
+    'Existing run dates lookup'
+  );
+  const rows = extractTursoRows_(response);
+  for (let index = 0; index < rows.length; index++) {
+    const runDate = String(rows[index].run_date || '').trim();
+    if (runDate) {
+      found[runDate] = true;
+    }
+  }
+  return found;
+}
+
+function fetchExistingTursoRawFileKeys_(urlFetchApp, settings, rawFileKeys) {
+  const found = {};
+  const uniqueKeys = uniqueValues_(rawFileKeys || []);
+  if (!uniqueKeys.length) {
+    return found;
+  }
+
+  const keyBatches = chunkItems_(uniqueKeys, 100);
+  for (let index = 0; index < keyBatches.length; index++) {
+    const response = assertSuccessfulTursoResponse_(
+      fetchRequestWithRetry_(
+        urlFetchApp,
+        buildTursoExistingRawFileKeysRequest_(settings, keyBatches[index]),
+        {
+          maxAttempts: 3,
+          retryableStatuses: [502, 503, 504]
+        }
+      ),
+      'Existing raw file lookup'
+    );
+    const rows = extractTursoRows_(response);
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const rawFileKey = String(rows[rowIndex].raw_file_key || '').trim();
+      if (rawFileKey) {
+        found[rawFileKey] = true;
+      }
+    }
+  }
+
+  return found;
 }

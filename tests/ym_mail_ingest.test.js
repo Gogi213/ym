@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const ingest = require('./load_code.js');
 
 test('exports core ingest helpers', () => {
@@ -182,6 +184,25 @@ test('extractSubjectReportDate_ parses ru date from subject', () => {
   );
 });
 
+test('inferEffectiveRunDate_ falls back to previous day when subject date is absent', () => {
+  assert.equal(
+    ingest.inferEffectiveRunDate_(
+      'Weekly Report',
+      new Date('2026-04-20T07:15:00Z'),
+      'Asia/Tbilisi'
+    ),
+    '2026-04-19'
+  );
+  assert.equal(
+    ingest.inferEffectiveRunDate_(
+      'Отчёт «_SenSoy_» за 18.04.2026',
+      new Date('2026-04-20T07:15:00Z'),
+      'Asia/Tbilisi'
+    ),
+    '2026-04-18'
+  );
+});
+
 test('collectCandidateMessages_ prefers subject report date over message date', () => {
   const message = {
     getDate() {
@@ -268,6 +289,80 @@ test('buildCandidatesByRunDate_ groups matched messages by effective run date', 
   assert.equal(grouped['2026-04-10'][0].primaryTopic, 'TW // Назонекс Аллерджи // Solta');
 });
 
+test('finalizeMonthBackfillSummary_ adds explicit outcome buckets and counts', () => {
+  const summary = ingest.finalizeMonthBackfillSummary_({
+    targetRunDate: '2026-04-27',
+    totalDates: 4,
+    threadsScanned: 42,
+    processedDates: ['2026-04-01', '2026-04-02'],
+    successfulDates: ['2026-04-01'],
+    noCandidateDates: ['2026-04-02'],
+    skippedExistingDates: ['2026-04-03'],
+    failedDates: [
+      {
+        runDate: '2026-04-04',
+        error: 'boom'
+      }
+    ],
+    dateResults: [
+      { runDate: '2026-04-01', status: 'processed', attachmentsSent: 2 },
+      { runDate: '2026-04-02', status: 'no_candidates' },
+      { runDate: '2026-04-03', status: 'skipped_existing' },
+      { runDate: '2026-04-04', status: 'failed', error: 'boom' }
+    ]
+  });
+
+  assert.equal(summary.processedCount, 2);
+  assert.equal(summary.successfulCount, 1);
+  assert.equal(summary.noCandidateCount, 1);
+  assert.equal(summary.skippedCount, 1);
+  assert.equal(summary.failedCount, 1);
+  assert.deepEqual(
+    summary.dateResults.map((item) => item.status),
+    ['processed', 'no_candidates', 'skipped_existing', 'failed']
+  );
+});
+
+test('run entrypoint delegates to month backfill workflow', () => {
+  const files = [
+    path.join(__dirname, '..', 'Code.js'),
+    path.join(__dirname, '..', 'appsscript-src', '30_entrypoints.js')
+  ];
+
+  for (const filePath of files) {
+    const source = fs.readFileSync(filePath, 'utf8');
+    assert.match(
+      source,
+      /function run\(\)\s*\{[\s\S]*?return runMonthBackfill\(\);[\s\S]*?\}/
+    );
+    assert.doesNotMatch(
+      source,
+      /function run\(\)\s*\{[\s\S]*?return runForDate_\(/
+    );
+  }
+});
+
+test('runMonthBackfill avoids month-wide Gmail prescan and uses per-day queries', () => {
+  const files = [
+    path.join(__dirname, '..', 'Code.js'),
+    path.join(__dirname, '..', 'appsscript-src', '30_entrypoints.js')
+  ];
+
+  for (const filePath of files) {
+    const source = fs.readFileSync(filePath, 'utf8');
+    const match = source.match(/function runMonthBackfill\(\)\s*\{([\s\S]*?)\n\}/);
+    assert.ok(match, 'runMonthBackfill() not found in ' + filePath);
+    const body = match[1];
+
+    assert.doesNotMatch(body, /const threads = listThreadsForQuery_\(/);
+    assert.doesNotMatch(body, /buildCandidatesByRunDate_\(/);
+    assert.doesNotMatch(body, /fetchRunDateExists_\(/);
+    assert.match(body, /fetchExistingRunDates_\(runtime\.UrlFetchApp, backfillSettings, runDates\[0\], targetRunDate\)/);
+    assert.match(body, /const runQuery = getRunDateSearchQuery_\(runDate\);/);
+    assert.match(body, /query:\s*runQuery/);
+  }
+});
+
 test('formatRunDate_ formats date in target timezone', () => {
   assert.equal(
     ingest.formatRunDate_(new Date('2026-04-06T20:30:00Z'), 'Asia/Tbilisi'),
@@ -340,6 +435,17 @@ test('getMonthBackfillSearchQuery_ covers the full month-to-date window', () => 
   assert.equal(
     ingest.getMonthBackfillSearchQuery_('2026-04-01'),
     'after:2026/04/01 before:2026/04/02 has:attachment'
+  );
+});
+
+test('getRunDateSearchQuery_ narrows Gmail search to one day', () => {
+  assert.equal(
+    ingest.getRunDateSearchQuery_('2026-04-12'),
+    'after:2026/04/13 before:2026/04/14 has:attachment'
+  );
+  assert.equal(
+    ingest.getRunDateSearchQuery_('2026-04-30'),
+    'after:2026/05/01 before:2026/05/02 has:attachment'
   );
 });
 
@@ -545,7 +651,7 @@ test('fetchRunDateExists_ passes status request as fetch(url, params) in Apps Sc
   assert.equal(calls[0].params.muteHttpExceptions, true);
 });
 
-test('fetchRunDateExists_ treats non-ready existing day as not yet complete', () => {
+test('fetchRunDateExists_ treats any existing day in Turso as already present', () => {
   const urlFetchApp = {
     fetch() {
       return {
@@ -583,7 +689,7 @@ test('fetchRunDateExists_ treats non-ready existing day as not yet complete', ()
     '2026-04-14'
   );
 
-  assert.equal(exists, false);
+  assert.equal(exists, true);
 });
 
 test('fetchRequestWithRetry_ retries Address unavailable transport exception', () => {
@@ -925,7 +1031,7 @@ test('getBackfillSettings_ uses direct Turso settings for status checks', () => 
       mode: 'turso',
       pipelineUrl: 'https://example.turso.io/v2/pipeline',
       authToken: 'secret-token',
-      skipExistingEnabled: false
+      skipExistingEnabled: true
     }
   );
 });
@@ -952,6 +1058,40 @@ test('runForDate_ writes raw attachments directly to Turso without default reset
     UrlFetchApp: {
       fetch(url, params) {
         fetchCalls.push({ url, params });
+        const payload = JSON.parse(params.payload);
+        const allSql = payload.requests.map((request) => request.stmt && request.stmt.sql).filter(Boolean).join('\n');
+        if (/select f\.raw_file_key from ingest_files f/i.test(allSql)) {
+          return {
+            getResponseCode() {
+              return 200;
+            },
+            getContentText() {
+              return JSON.stringify({
+                results: [
+                  {
+                    type: 'ok',
+                    response: {
+                      type: 'execute',
+                      result: {
+                        cols: [{ name: 'raw_file_key' }],
+                        rows: [],
+                        affected_row_count: 0,
+                        rows_read: 0,
+                        rows_written: 0
+                      }
+                    }
+                  },
+                  {
+                    type: 'ok',
+                    response: {
+                      type: 'close'
+                    }
+                  }
+                ]
+              });
+            }
+          };
+        }
         return {
           getResponseCode() {
             return 200;
@@ -1025,11 +1165,17 @@ test('runForDate_ writes raw attachments directly to Turso without default reset
 
   assert.equal(result.attachmentsSeen, 1);
   assert.equal(result.attachmentsSent, 1);
-  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls.length, 2);
   assert.equal(fetchCalls[0].url, 'https://example.turso.io/v2/pipeline');
-  assert.equal(fetchCalls[0].params.headers.Authorization, 'Bearer secret-token');
-  assert.equal(fetchCalls[0].params.headers['x-ingest-token'], undefined);
-  const ingestPayload = JSON.parse(fetchCalls[0].params.payload);
+  assert.equal(fetchCalls[1].url, 'https://example.turso.io/v2/pipeline');
+  assert.equal(fetchCalls[1].params.headers.Authorization, 'Bearer secret-token');
+  assert.equal(fetchCalls[1].params.headers['x-ingest-token'], undefined);
+  const lookupPayload = JSON.parse(fetchCalls[0].params.payload);
+  assert.match(
+    lookupPayload.requests.map((request) => request.stmt && request.stmt.sql).filter(Boolean).join('\n'),
+    /select f\.raw_file_key from ingest_files f/i
+  );
+  const ingestPayload = JSON.parse(fetchCalls[1].params.payload);
   assert.match(
     ingestPayload.requests.map((request) => request.stmt && request.stmt.sql).join('\n'),
     /insert into ingest_files/i
@@ -1080,6 +1226,40 @@ test('runForDate_ uploads attachments from all matching messages in the window, 
     UrlFetchApp: {
       fetch(url, params) {
         fetchCalls.push({ url, params });
+        const payload = JSON.parse(params.payload);
+        const allSql = payload.requests.map((request) => request.stmt && request.stmt.sql).filter(Boolean).join('\n');
+        if (/select f\.raw_file_key from ingest_files f/i.test(allSql)) {
+          return {
+            getResponseCode() {
+              return 200;
+            },
+            getContentText() {
+              return JSON.stringify({
+                results: [
+                  {
+                    type: 'ok',
+                    response: {
+                      type: 'execute',
+                      result: {
+                        cols: [{ name: 'raw_file_key' }],
+                        rows: [],
+                        affected_row_count: 0,
+                        rows_read: 0,
+                        rows_written: 0
+                      }
+                    }
+                  },
+                  {
+                    type: 'ok',
+                    response: {
+                      type: 'close'
+                    }
+                  }
+                ]
+              });
+            }
+          };
+        }
         return {
           getResponseCode() {
             return 200;
@@ -1164,9 +1344,9 @@ test('runForDate_ uploads attachments from all matching messages in the window, 
   assert.equal(result.matchedMessages, 2);
   assert.equal(result.attachmentsSeen, 2);
   assert.equal(result.attachmentsSent, 2);
-  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls.length, 2);
 
-  const payload = JSON.parse(fetchCalls[0].params.payload);
+  const payload = JSON.parse(fetchCalls[1].params.payload);
   const allSql = payload.requests.map((item) => item.stmt && item.stmt.sql).filter(Boolean).join('\n');
   assert.equal(
     payload.requests.filter((item) => item.stmt && /insert into ingest_files/i.test(item.stmt.sql)).length,
@@ -1185,6 +1365,415 @@ test('runForDate_ uploads attachments from all matching messages in the window, 
     1
   );
   assert.doesNotMatch(allSql, /delete from ingest_file_payloads|delete from ingest_files/i);
+});
+
+test('runForDate_ skips payload upload when the same raw file already exists in Turso', () => {
+  const fetchCalls = [];
+  const attachment = {
+    getName() {
+      return 'repeat.csv';
+    },
+    getContentType() {
+      return 'text/csv';
+    },
+    copyBlob() {
+      return {
+        getBytes() {
+          return [65, 66, 67];
+        }
+      };
+    }
+  };
+  const runtime = {
+    UrlFetchApp: {
+      fetch(url, params) {
+        fetchCalls.push({ url, params });
+        const payload = JSON.parse(params.payload);
+        const allSql = payload.requests.map((request) => request.stmt && request.stmt.sql).filter(Boolean).join('\n');
+        assert.match(allSql, /select f\.raw_file_key from ingest_files f/i);
+        return {
+          getResponseCode() {
+            return 200;
+          },
+          getContentText() {
+            return JSON.stringify({
+              results: [
+                {
+                  type: 'ok',
+                  response: {
+                    type: 'execute',
+                    result: {
+                      cols: [{ name: 'raw_file_key' }],
+                      rows: [['2026-04-14|_SenSoy_|b5d4045c3f466fa91fe2cc6abe79232a1a57cdf104f7a26e716e0a1e2789df78']],
+                      affected_row_count: 0,
+                      rows_read: 1,
+                      rows_written: 0
+                    }
+                  }
+                },
+                {
+                  type: 'ok',
+                  response: {
+                    type: 'close'
+                  }
+                }
+              ]
+            });
+          }
+        };
+      }
+    }
+  };
+  const runContext = {
+    timeZone: 'Asia/Tbilisi',
+    topicRules: [{ raw: '_SenSoy_' }],
+    verboseLogging: false,
+    settings: {
+      mode: 'turso',
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token'
+    }
+  };
+
+  const result = ingest.runForDate_(
+    runtime,
+    '2026-04-14',
+    0,
+    runContext,
+    {
+      query: 'newer_than:3d has:attachment',
+      preloadedThreadsCount: 1,
+      preloadedCandidates: [
+        {
+          primaryTopic: '_SenSoy_',
+          matchedTopic: '_SenSoy_',
+          topicRole: 'primary',
+          subject: 'Отчёт «_SenSoy_» за 14.04.2026',
+          messageDate: new Date('2026-04-14T09:00:00Z'),
+          messageId: 'msg-1',
+          threadId: 'thr-1',
+          message: {
+            getAttachments() {
+              return [attachment];
+            }
+          }
+        }
+      ]
+    }
+  );
+
+  assert.equal(result.attachmentsSeen, 1);
+  assert.equal(result.attachmentsSent, 0);
+  assert.equal(fetchCalls.length, 1);
+  const lookupPayload = JSON.parse(fetchCalls[0].params.payload);
+  const allSql = lookupPayload.requests.map((request) => request.stmt && request.stmt.sql).filter(Boolean).join('\n');
+  assert.match(allSql, /select f\.raw_file_key from ingest_files f/i);
+  assert.doesNotMatch(allSql, /insert into ingest_files|insert into ingest_file_payloads/i);
+});
+
+test('runForDate_ splits uploads into batches of six attachments', () => {
+  const fetchCalls = [];
+  const buildAttachment = (index) => ({
+    getName() {
+      return `report-${index}.csv`;
+    },
+    getContentType() {
+      return 'text/csv';
+    },
+    copyBlob() {
+      return {
+        getBytes() {
+          return [65, 66, 67 + index];
+        }
+      };
+    }
+  });
+  const attachments = Array.from({ length: 7 }, (_, index) => buildAttachment(index));
+  const runtime = {
+    UrlFetchApp: {
+      fetch(url, params) {
+        fetchCalls.push({ url, params });
+        const payload = JSON.parse(params.payload);
+        const allSql = payload.requests.map((request) => request.stmt && request.stmt.sql).filter(Boolean).join('\n');
+        if (/select f\.raw_file_key from ingest_files f/i.test(allSql)) {
+          return {
+            getResponseCode() {
+              return 200;
+            },
+            getContentText() {
+              return JSON.stringify({
+                results: [
+                  {
+                    type: 'ok',
+                    response: {
+                      type: 'execute',
+                      result: {
+                        cols: [{ name: 'raw_file_key' }],
+                        rows: [],
+                        affected_row_count: 0,
+                        rows_read: 0,
+                        rows_written: 0
+                      }
+                    }
+                  },
+                  {
+                    type: 'ok',
+                    response: {
+                      type: 'close'
+                    }
+                  }
+                ]
+              });
+            }
+          };
+        }
+        return {
+          getResponseCode() {
+            return 200;
+          },
+          getContentText() {
+            return JSON.stringify({
+              results: [
+                {
+                  type: 'ok',
+                  response: {
+                    type: 'execute',
+                    result: {
+                      cols: [],
+                      rows: [],
+                      affected_row_count: 1,
+                      rows_read: 0,
+                      rows_written: 1
+                    }
+                  }
+                },
+                {
+                  type: 'ok',
+                  response: {
+                    type: 'close'
+                  }
+                }
+              ]
+            });
+          }
+        };
+      }
+    }
+  };
+  const runContext = {
+    timeZone: 'Asia/Tbilisi',
+    topicRules: [{ raw: '_SenSoy_' }],
+    verboseLogging: false,
+    settings: {
+      mode: 'turso',
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token'
+    }
+  };
+
+  const result = ingest.runForDate_(
+    runtime,
+    '2026-04-14',
+    0,
+    runContext,
+    {
+      query: 'newer_than:3d has:attachment',
+      preloadedThreadsCount: 1,
+      preloadedCandidates: [
+        {
+          primaryTopic: '_SenSoy_',
+          matchedTopic: '_SenSoy_',
+          topicRole: 'primary',
+          subject: 'Отчёт «_SenSoy_» за 14.04.2026',
+          messageDate: new Date('2026-04-14T09:00:00Z'),
+          messageId: 'msg-1',
+          threadId: 'thr-1',
+          message: {
+            getAttachments() {
+              return attachments;
+            }
+          }
+        }
+      ]
+    }
+  );
+
+  assert.equal(result.attachmentsSeen, 7);
+  assert.equal(result.attachmentsSent, 7);
+  assert.equal(result.uploadBatches, 2);
+  assert.equal(fetchCalls.length, 3);
+  const firstUploadPayload = JSON.parse(fetchCalls[1].params.payload);
+  const secondUploadPayload = JSON.parse(fetchCalls[2].params.payload);
+  assert.equal(
+    firstUploadPayload.requests.filter((item) => item.stmt && /insert into ingest_file_payloads/i.test(item.stmt.sql)).length,
+    6
+  );
+  assert.equal(
+    secondUploadPayload.requests.filter((item) => item.stmt && /insert into ingest_file_payloads/i.test(item.stmt.sql)).length,
+    1
+  );
+});
+
+test('runForDate_ adaptively splits a batch when Turso rejects it for bandwidth', () => {
+  const fetchCalls = [];
+  let uploadAttempt = 0;
+  const buildAttachment = (index) => ({
+    getName() {
+      return `report-${index}.csv`;
+    },
+    getContentType() {
+      return 'text/csv';
+    },
+    copyBlob() {
+      return {
+        getBytes() {
+          return [65, 66, 67 + index];
+        }
+      };
+    }
+  });
+  const attachments = Array.from({ length: 7 }, (_, index) => buildAttachment(index));
+  const runtime = {
+    UrlFetchApp: {
+      fetch(url, params) {
+        fetchCalls.push({ url, params });
+        const payload = JSON.parse(params.payload);
+        const allSql = payload.requests.map((request) => request.stmt && request.stmt.sql).filter(Boolean).join('\n');
+        if (/select f\.raw_file_key from ingest_files f/i.test(allSql)) {
+          return {
+            getResponseCode() {
+              return 200;
+            },
+            getContentText() {
+              return JSON.stringify({
+                results: [
+                  {
+                    type: 'ok',
+                    response: {
+                      type: 'execute',
+                      result: {
+                        cols: [{ name: 'raw_file_key' }],
+                        rows: [],
+                        affected_row_count: 0,
+                        rows_read: 0,
+                        rows_written: 0
+                      }
+                    }
+                  },
+                  {
+                    type: 'ok',
+                    response: {
+                      type: 'close'
+                    }
+                  }
+                ]
+              });
+            }
+          };
+        }
+
+        uploadAttempt++;
+        if (uploadAttempt === 1) {
+          return {
+            getResponseCode() {
+              return 429;
+            },
+            getContentText() {
+              return 'Bandwidth quota exceeded: https://example.turso.io/v2/pipeline. Try reducing the rate of data transfer.';
+            }
+          };
+        }
+
+        return {
+          getResponseCode() {
+            return 200;
+          },
+          getContentText() {
+            return JSON.stringify({
+              results: [
+                {
+                  type: 'ok',
+                  response: {
+                    type: 'execute',
+                    result: {
+                      cols: [],
+                      rows: [],
+                      affected_row_count: 1,
+                      rows_read: 0,
+                      rows_written: 1
+                    }
+                  }
+                },
+                {
+                  type: 'ok',
+                  response: {
+                    type: 'close'
+                  }
+                }
+              ]
+            });
+          }
+        };
+      }
+    }
+  };
+  const runContext = {
+    timeZone: 'Asia/Tbilisi',
+    topicRules: [{ raw: '_SenSoy_' }],
+    verboseLogging: false,
+    settings: {
+      mode: 'turso',
+      pipelineUrl: 'https://example.turso.io/v2/pipeline',
+      authToken: 'secret-token'
+    }
+  };
+
+  const result = ingest.runForDate_(
+    runtime,
+    '2026-04-14',
+    0,
+    runContext,
+    {
+      query: 'newer_than:3d has:attachment',
+      preloadedThreadsCount: 1,
+      preloadedCandidates: [
+        {
+          primaryTopic: '_SenSoy_',
+          matchedTopic: '_SenSoy_',
+          topicRole: 'primary',
+          subject: 'Отчёт «_SenSoy_» за 14.04.2026',
+          messageDate: new Date('2026-04-14T09:00:00Z'),
+          messageId: 'msg-1',
+          threadId: 'thr-1',
+          message: {
+            getAttachments() {
+              return attachments;
+            }
+          }
+        }
+      ]
+    }
+  );
+
+  assert.equal(result.attachmentsSeen, 7);
+  assert.equal(result.attachmentsSent, 7);
+  assert.equal(result.uploadBatches, 3);
+  assert.equal(fetchCalls.length, 5);
+  const firstSuccessPayload = JSON.parse(fetchCalls[2].params.payload);
+  const secondSuccessPayload = JSON.parse(fetchCalls[3].params.payload);
+  const tailPayload = JSON.parse(fetchCalls[4].params.payload);
+  assert.equal(
+    firstSuccessPayload.requests.filter((item) => item.stmt && /insert into ingest_file_payloads/i.test(item.stmt.sql)).length,
+    3
+  );
+  assert.equal(
+    secondSuccessPayload.requests.filter((item) => item.stmt && /insert into ingest_file_payloads/i.test(item.stmt.sql)).length,
+    3
+  );
+  assert.equal(
+    tailPayload.requests.filter((item) => item.stmt && /insert into ingest_file_payloads/i.test(item.stmt.sql)).length,
+    1
+  );
 });
 
 test('buildAttachmentRequest_ uses stable content-based identity and upsert semantics', () => {

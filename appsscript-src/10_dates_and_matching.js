@@ -23,6 +23,14 @@ function resolveTargetRunDate_(date, timeZone, dayOffset) {
   return formatRunDate_(shiftedDate, timeZone);
 }
 
+function inferEffectiveRunDate_(subject, messageDate, timeZone) {
+  const subjectReportDate = extractSubjectReportDate_(subject);
+  if (subjectReportDate) {
+    return subjectReportDate;
+  }
+  return resolveTargetRunDate_(messageDate, timeZone, CONFIG_.runDayOffset);
+}
+
 function listMonthRunDates_(targetRunDate) {
   const raw = String(targetRunDate || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
@@ -136,7 +144,7 @@ function collectCandidateMessages_(threads, topicRules, runDate, timeZone) {
       const message = messages[j];
       const subject = String(message.getSubject() || '').trim();
       const subjectReportDate = extractSubjectReportDate_(subject);
-      const effectiveRunDate = subjectReportDate || formatRunDate_(message.getDate(), timeZone);
+      const effectiveRunDate = inferEffectiveRunDate_(subject, message.getDate(), timeZone);
 
       if (effectiveRunDate !== runDate) {
         continue;
@@ -176,7 +184,7 @@ function buildCandidatesByRunDate_(threads, topicRules, timeZone) {
       const message = messages[j];
       const subject = String(message.getSubject() || '').trim();
       const subjectReportDate = extractSubjectReportDate_(subject);
-      const effectiveRunDate = subjectReportDate || formatRunDate_(message.getDate(), timeZone);
+      const effectiveRunDate = inferEffectiveRunDate_(subject, message.getDate(), timeZone);
       const matchedTopicRule = findMatchedTopicRule_(subject, topicRules);
 
       if (!matchedTopicRule) {
