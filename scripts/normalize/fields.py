@@ -218,7 +218,29 @@ def extract_report_date(*, row: Dict[str, str], message_date: str) -> str:
     row_date = str(row.get("Дата визита", "")).strip()
     if row_date:
         return row_date
-    return datetime.fromisoformat(message_date.replace("Z", "+00:00")).date().isoformat()
+    # Try standard ISO format first
+    try:
+        return datetime.fromisoformat(message_date.replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        pass
+    # Try email date format: 'Tue Apr 21 2026 05:22:02 GMT+0400 (Georgia Standard Time)'
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(message_date)
+        return dt.date().isoformat()
+    except Exception:
+        pass
+    # Fallback: extract date from the string manually
+    # Format: 'Tue Apr 21 2026 05:22:02 GMT+0400'
+    import re
+    match = re.match(r"[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})", message_date)
+    if match:
+        month_str, day, year = match.groups()
+        month_map = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+                     "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
+        month = month_map.get(month_str, 1)
+        return f"{year}-{month:02d}-{int(day):02d}"
+    raise ValueError(f"Invalid date format: {message_date}")
 
 
 def assign_goal_slots(
